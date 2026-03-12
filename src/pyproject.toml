@@ -1,0 +1,29 @@
+[project]
+name = "davico-photo-pipeline"
+description = "Photo Post Processing Automation Pipeline"
+version = "0.0.0"
+authors = [
+    { name = "Davide Seddio" }
+]
+
+dependencies = [
+  "PyYAML>=6.0",
+  "pyexiftool>=0.5",
+  "opencv-python>=4.8",
+  "numpy>=1.24",
+  "rawpy>=0.18",
+  "lensfunpy>=1.13",
+]
+
+[dependency-groups]
+dev = [
+    "pytest ~= 8.4",
+    "pytest-cov ~= 6.2",
+    "pytest-asyncio ~= 1.1",
+    "ruff ~=0.13.0",
+]
+
+[tool.uv]
+package = false
+python-downloads = "manual"
+default-groups = ["dev"]
