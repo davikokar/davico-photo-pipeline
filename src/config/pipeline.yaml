@@ -1,0 +1,53 @@
+pipeline:
+  workspace: ./workspace
+  output: ./output
+  keep_intermediates: true   # set to false in production to save disk space
+
+steps:
+  hdr:
+    tool: luminance_hdr        # options: luminance_hdr, opencv
+    variants:
+      - name: fusion
+        params: {}
+      - name: compression
+        params: {}
+      - name: adjusted
+        params: {}
+    deghost: true
+
+  stitch:
+    tool: hugin                # options: hugin, opencv
+    projection: equirectangular
+
+  geometry:
+    lens_correction: true
+    perspective: auto          # options: auto, manual, skip
+    horizon: auto              # options: auto, skip
+
+  crop:
+    mode: auto                 # options: auto (largest inscribed rect), fill (content-aware)
+
+  optics:
+    chromatic_aberration: true
+    dust_removal: true
+    denoise: true
+    denoise_strength: 0.4      # 0.0 - 1.0
+
+  color:
+    auto_levels: false
+    ai_suggest: true           # AI analyses image and suggests adjustments
+
+  cleanup:
+    enabled: true              # set to false to skip inpainting step
+
+notifications:
+  enabled: false
+  channel: email               # options: email, telegram
+  email: ""
+  telegram_token: ""
+  telegram_chat_id: ""
+
+review_points:
+  - after_grouping
+  - after_hdr
+  - after_final
