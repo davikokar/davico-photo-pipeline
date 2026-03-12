@@ -427,3 +427,43 @@ def grouping_html_report(pano_groups: list[PanoramaGroup], output_path: Path) ->
     output_path.write_text(html_content, encoding="utf-8")
     logger.info(f"HTML report generated: {output_path}")
 
+
+
+# ---------------------------------------------------------------------------
+# Export helpers — called by run_grouper after detection
+# ---------------------------------------------------------------------------
+
+def export_groups(
+    pano_groups: list,
+    input_dir: Path,
+    session_dir: Path,
+    session_id: str,
+) -> tuple:
+    """
+    Export detected groups to versioned JSON and generate HTML review page.
+
+    Returns:
+        (json_path, html_path)
+    """
+    from pipeline.steps.grouping.groups_io import (
+        save_groups_json,
+        panorama_groups_to_json,
+        _next_version_number,
+    )
+    from pipeline.steps.grouping.groups_html import generate_review_html
+
+    groups_data  = panorama_groups_to_json(pano_groups, input_dir)
+    json_path    = save_groups_json(groups_data, session_dir, session_id, str(input_dir))
+
+    # Next version for the HTML export button (= version after the one just saved)
+    next_ver     = _next_version_number(session_dir)
+    html_path    = session_dir / "groups_review.html"
+    generate_review_html(
+        groups_data  = groups_data,
+        input_dir    = input_dir,
+        output_path  = html_path,
+        session_id   = session_id,
+        next_version = next_ver,
+    )
+
+    return json_path, html_path

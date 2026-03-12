@@ -36,7 +36,7 @@ from PIL import Image
 
 from pipeline.utils.exif import read_folder
 from pipeline.state import SessionState, GroupType
-from pipeline.steps.grouping.grouper import run_grouper, grouping_report, grouping_html_report
+from pipeline.steps.grouping.grouper import export_groups, run_grouper, grouping_report, grouping_html_report
 from pipeline.utils.logger import get_logger
 
 logger = get_logger("integration_test")
@@ -71,6 +71,7 @@ def test_grouper_integration(input_folder):
     with tempfile.TemporaryDirectory() as ws:
         state = SessionState(workspace=Path(ws), input_dir=str(folder))
         pano_groups = run_grouper(folder, state, config={})
+        export_groups(pano_groups, input_folder, state.session_dir, state.session_id)
 
     # 3. Print reports
     print(grouping_report(pano_groups))

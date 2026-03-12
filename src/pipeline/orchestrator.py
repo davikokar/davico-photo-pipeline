@@ -121,6 +121,9 @@ class Orchestrator:
                 self.logger.warning("User aborted after grouping review")
                 return
 
+        # Reload groups from most recent JSON (picks up manual edits via HTML tool)
+        self._reload_groups_from_json()
+
         # Process each group through the remaining steps
         for group in self.state.all_groups():
             self._process_group(group)
@@ -204,9 +207,70 @@ class Orchestrator:
     # ------------------------------------------------------------------
 
     def _run_grouping(self):
-        """Detect and register groups from input directory."""
-        # TODO: implement pipeline/steps/grouper.py
-        self.logger.info("Running grouper (stub)")
+        """
+        Detect groups, save versioned JSON, generate HTML review page.
+
+        After this runs, the session directory will contain:
+          groups_001.json     ← auto-detected groups
+          groups_review.html  ← interactive review/edit page
+
+        The pipeline pauses at _review_grouping() so the user can open
+        the HTML page, drag-and-drop any corrections, export a new JSON
+        (groups_002.json), drop it in the session directory, then continue.
+        The HDR step will automatically use the highest-numbered JSON.
+        """
+        from pipeline.steps.grouping.grouper import run_grouper, export_groups
+        from pipeline.steps.grouping.groups_io import (
+            load_latest_groups_json, json_to_state_groups, _next_version_number
+        )
+
+        input_dir = Path(self.state.session["input_dir"])
+        pano_groups = run_grouper(input_dir, self.state, self.config)
+
+        json_path, html_path = export_groups(
+            pano_groups  = pano_groups,
+            input_dir    = input_dir,
+            session_dir  = self.state.session_dir,
+            session_id   = self.state.session_id,
+        )
+        self.logger.info(
+            f"Grouping complete.\n"
+            f"  → JSON:  {json_path}\n"
+            f"  → HTML:  {html_path}\n"
+            f"  Open the HTML file to review/edit groups, export a new JSON,\n"
+            f"  drop it in {self.state.session_dir}, then continue."
+        )
+
+    def _reload_groups_from_json(self):
+        """
+        Reload groups into state from the most recent groups_NNN.json.
+
+        Called just before HDR merge so that any manual edits made via the
+        HTML review tool are picked up automatically.
+        """
+        from pipeline.steps.grouping.groups_io import (
+            load_latest_groups_json, json_to_state_groups
+        )
+        from pipeline.state import GroupType
+
+        data = load_latest_groups_json(self.state.session_dir)
+        if data is None:
+            self.logger.warning("No groups JSON found — using current state")
+            return
+
+        state_groups = json_to_state_groups(data["groups"])
+        self.logger.info(
+            f"Loaded {len(state_groups)} group(s) from "
+            f"{data.get('generated_at','?')[:19]}"
+        )
+
+        # Re-register groups (overwrite whatever was in state from auto-detection)
+        self.state._state["groups"] = {}
+        for g in state_groups:
+            self.state.add_group(g["id"], g["files"], g["type"])
+            # Preserve bracket structure for HDR step
+            self.state._state["groups"][g["id"]]["brackets"] = g.get("brackets", [])
+        self.state.save()
 
     def _run_hdr_merge(self, group: dict, log) -> str | None:
         """Merge HDR exposures and apply deghosting."""
