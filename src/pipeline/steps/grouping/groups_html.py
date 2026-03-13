@@ -202,6 +202,18 @@ def generate_review_html(
     padding: 12px 16px;
     background: var(--surface2);
     border-bottom: 1px solid var(--border);
+    cursor: grab;
+    user-select: none;
+  }}
+  .group-header:active {{ cursor: grabbing; }}
+  .group-card.group-dragging {{
+    opacity: 0.4;
+  }}
+  .group-card.group-drop-above {{
+    box-shadow: 0 -3px 0 0 var(--accent);
+  }}
+  .group-card.group-drop-below {{
+    box-shadow: 0 3px 0 0 var(--accent);
   }}
   .group-id {{
     font-family: var(--mono); font-size: 13px; font-weight: 500;
@@ -377,7 +389,8 @@ const NEXT_VER  = "{next_version_str}";
 
 let groups = {groups_json_str};
 
-let dragState = null;  // {{ bracketEl, sourceGroupId, bracketIndex }}
+let bracketDrag = null;  // {{ sourceGroupIdx, bracketIdx }}
+let groupDrag   = null;  // {{ sourceGroupIdx }}
 
 
 // ── Rendering ─────────────────────────────────────────────────────────────
@@ -419,6 +432,49 @@ function buildGroupCard(g, gi) {{
   delBtn.textContent = '✕ remove';
   delBtn.addEventListener('click', () => removeGroup(gi));
   header.appendChild(delBtn);
+
+  // Group-level drag: initiated from the header
+  header.addEventListener('dragstart', e => {{
+    groupDrag = {{ sourceGroupIdx: gi }};
+    e.dataTransfer.effectAllowed = 'move';
+    // Prevent text selection ghost image on some browsers
+    e.dataTransfer.setDragImage(card, 20, 20);
+    setTimeout(() => card.classList.add('group-dragging'), 0);
+  }});
+  header.addEventListener('dragend', () => {{
+    card.classList.remove('group-dragging');
+    document.querySelectorAll('.group-drop-above, .group-drop-below')
+            .forEach(el => el.classList.remove('group-drop-above', 'group-drop-below'));
+    groupDrag = null;
+  }});
+  header.draggable = true;
+
+  // Group card: receive group drops (show insertion line above/below)
+  card.addEventListener('dragover', e => {{
+    if (!groupDrag) return;           // only handle group drags here
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const rect  = card.getBoundingClientRect();
+    const after = e.clientY > rect.top + rect.height / 2;
+    document.querySelectorAll('.group-drop-above, .group-drop-below')
+            .forEach(c => c.classList.remove('group-drop-above', 'group-drop-below'));
+    card.classList.add(after ? 'group-drop-below' : 'group-drop-above');
+    card.dataset.dropAfter = after ? '1' : '0';
+  }});
+  card.addEventListener('dragleave', e => {{
+    if (!groupDrag) return;
+    if (!card.contains(e.relatedTarget)) {{
+      card.classList.remove('group-drop-above', 'group-drop-below');
+    }}
+  }});
+  card.addEventListener('drop', e => {{
+    card.classList.remove('group-drop-above', 'group-drop-below');
+    if (!groupDrag) return;
+    e.preventDefault();
+    const after = card.dataset.dropAfter === '1';
+    moveGroup(groupDrag.sourceGroupIdx, gi, after);
+  }});
+
   card.appendChild(header);
 
   // Brackets
@@ -435,6 +491,7 @@ function buildGroupCard(g, gi) {{
 
   // Drag-over events on the container
   container.addEventListener('dragover', e => {{
+    if (groupDrag) return;   // let group-level handler take it
     e.preventDefault();
     card.classList.add('drag-over');
   }});
@@ -444,9 +501,9 @@ function buildGroupCard(g, gi) {{
   container.addEventListener('drop', e => {{
     e.preventDefault();
     card.classList.remove('drag-over');
-    if (!dragState) return;
+    if (!bracketDrag) return;   // ignore group drags
     const targetGroupIdx = parseInt(container.dataset.groupIdx);
-    moveBracket(dragState.sourceGroupIdx, dragState.bracketIdx, targetGroupIdx);
+    moveBracket(bracketDrag.sourceGroupIdx, bracketDrag.bracketIdx, targetGroupIdx);
   }});
 
   card.appendChild(container);
@@ -509,12 +566,13 @@ function buildBracketCard(bracket, groupIdx, bracketIdx) {{
   card.appendChild(footer);
 
   card.addEventListener('dragstart', e => {{
-    dragState = {{ sourceGroupIdx: groupIdx, bracketIdx }};
+    bracketDrag = {{ sourceGroupIdx: groupIdx, bracketIdx }};
+    e.stopPropagation();   // don't trigger group header drag
     setTimeout(() => card.classList.add('dragging'), 0);
   }});
   card.addEventListener('dragend', () => {{
     card.classList.remove('dragging');
-    dragState = null;
+    bracketDrag = null;
   }});
 
   return card;
@@ -541,6 +599,23 @@ function moveBracket(fromGroupIdx, bracketIdx, toGroupIdx) {{
   autoType(toGroupIdx);
   render();
   toast('Bracket moved', 'ok');
+}}
+
+function moveGroup(fromIdx, toIdx, insertAfter) {{
+  if (fromIdx === toIdx) return;
+
+  // Calculate actual insertion index in the array after removal
+  const group = groups.splice(fromIdx, 1)[0];
+  let insertAt = insertAfter ? toIdx : toIdx - 1;
+
+  // If we removed an element before toIdx, the target shifted by -1
+  if (fromIdx < toIdx) insertAt = insertAfter ? toIdx : toIdx - 1;
+  else                  insertAt = insertAfter ? toIdx + 1 : toIdx;
+
+  groups.splice(insertAt, 0, group);
+  renumberGroups();
+  render();
+  toast(`Moved to ${{group.id}}`, 'ok');
 }}
 
 function breakBracket(groupIdx, bracketIdx) {{
