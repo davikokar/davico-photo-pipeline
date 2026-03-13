@@ -8,6 +8,7 @@ The page embeds all thumbnails as base64 and provides:
   - New group creation
   - Group deletion
   - Break a bracket into individual shots (for misdetected HDR sequences)
+  - Extract a bracket to a new group inserted immediately below
   - Export to JSON (downloads a new groups_NNN.json file)
 
 The exported JSON follows the same format as groups_io.py and can be
@@ -252,30 +253,42 @@ def generate_review_html(
     cursor: grabbing;
   }}
 
-  /* ── Break button (only visible on multi-shot brackets, on hover) ── */
+  /* ── Bracket action buttons (visible on hover, top-right corner) ── */
   .bracket-card {{
     position: relative;
   }}
-  .btn-break {{
+  .bracket-actions {{
     display: none;
     position: absolute; top: 5px; right: 5px;
+    flex-direction: row; gap: 4px;
+    z-index: 10;
+  }}
+  .bracket-card:hover .bracket-actions {{
+    display: flex;
+  }}
+  .btn-break,
+  .btn-extract {{
     font-family: var(--mono); font-size: 10px;
-    background: rgba(13,13,13,0.85);
-    border: 1px solid var(--accent2);
-    color: var(--accent2);
+    background: rgba(13,13,13,0.88);
     border-radius: 3px;
     padding: 2px 7px;
     cursor: pointer;
-    z-index: 10;
     letter-spacing: 0.03em;
     transition: background 0.12s, color 0.12s;
   }}
-  .bracket-card:hover .btn-break {{
-    display: block;
+  .btn-break {{
+    border: 1px solid var(--accent2);
+    color: var(--accent2);
   }}
   .btn-break:hover {{
-    background: var(--accent2);
-    color: #fff;
+    background: var(--accent2); color: #fff;
+  }}
+  .btn-extract {{
+    border: 1px solid #5b9bd5;
+    color: #5b9bd5;
+  }}
+  .btn-extract:hover {{
+    background: #5b9bd5; color: #fff;
   }}
 
   .bracket-shots {{
@@ -462,7 +475,20 @@ function buildBracketCard(bracket, groupIdx, bracketIdx) {{
   }});
   card.appendChild(shotsRow);
 
-  // Break button — only shown on brackets with 2+ shots
+  // Action buttons (break + extract) — shown on hover
+  const actions = el('div', 'bracket-actions');
+
+  // "→ group": always shown — moves this bracket into a new group inserted below
+  const extractBtn = el('button', 'btn-extract');
+  extractBtn.textContent = '→ group';
+  extractBtn.title = 'Move to new group (inserted below)';
+  extractBtn.addEventListener('click', e => {{
+    e.stopPropagation();
+    extractToNewGroup(groupIdx, bracketIdx);
+  }});
+  actions.appendChild(extractBtn);
+
+  // "⋯ break": only on multi-shot brackets — splits into individual shots
   if (bracket.shots.length > 1) {{
     const breakBtn = el('button', 'btn-break');
     breakBtn.textContent = '⋯ break';
@@ -471,8 +497,10 @@ function buildBracketCard(bracket, groupIdx, bracketIdx) {{
       e.stopPropagation();
       breakBracket(groupIdx, bracketIdx);
     }});
-    card.appendChild(breakBtn);
+    actions.appendChild(breakBtn);
   }}
+
+  card.appendChild(actions);
 
   const footer = el('div', 'bracket-footer');
   const names = bracket.shots.map(s => s.filename).join('  ');
@@ -526,6 +554,33 @@ function breakBracket(groupIdx, bracketIdx) {{
   autoType(groupIdx);
   render();
   toast(`Bracket split into ${{singles.length}} individual shots`, 'ok');
+}}
+
+function extractToNewGroup(groupIdx, bracketIdx) {{
+  // Remove bracket from source group
+  const bracket = groups[groupIdx].brackets.splice(bracketIdx, 1)[0];
+
+  // Build the new group (inserted immediately after source group)
+  const newGroup = {{
+    id:       '__new__',   // placeholder, renumbered below
+    type:     'single',
+    brackets: [bracket],
+  }};
+  groups.splice(groupIdx + 1, 0, newGroup);
+
+  // Update types and renumber all IDs
+  autoType(groupIdx);
+  autoType(groupIdx + 1);
+  renumberGroups();
+
+  render();
+  toast(`Bracket extracted → ${{groups[groupIdx + 1].id}}`, 'ok');
+}}
+
+function renumberGroups() {{
+  groups.forEach((g, i) => {{
+    g.id = 'group_' + String(i + 1).padStart(3, '0');
+  }});
 }}
 
 function autoType(groupIdx) {{
