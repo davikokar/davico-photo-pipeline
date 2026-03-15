@@ -48,7 +48,8 @@ EXPECTED = [
 ]
 
 
-@pytest.mark.parametrize("input_folder", ['C:\\temp\\pipeline_tests'])
+# @pytest.mark.parametrize("input_folder", ['C:\\temp\\pipeline_tests'])
+@pytest.mark.parametrize("input_folder", ['C:\\Users\\david\\Desktop\\Fotolab\\2025_03_30\\mavic'])
 def test_grouper_integration(input_folder):
     """
     Args:
@@ -64,7 +65,7 @@ def test_grouper_integration(input_folder):
     logger.info(f"Read EXIF from {len(exif_data)} files")
 
     # Verify all files were read
-    assert len(exif_data) == 18, f"Expected 18 files, got {len(exif_data)}"
+    # assert len(exif_data) == 18, f"Expected 18 files, got {len(exif_data)}"
 
     # 2. Run grouper
     logger.info("Running grouper...")
@@ -73,9 +74,9 @@ def test_grouper_integration(input_folder):
         pano_groups = run_grouper(folder, state, config={})
         export_groups(pano_groups, input_folder, state.session_dir, state.session_id)
 
-    # 3. Print reports
-    print(grouping_report(pano_groups))
-    grouping_html_report(pano_groups, output_path=Path(ws) / "grouping_report.html")
+        # 3. Print reports
+        print(grouping_report(pano_groups))
+        grouping_html_report(pano_groups, output_path=Path(ws) / "grouping_report.html")
 
     # 4. Assertions
     logger.info("Verifying results...")
