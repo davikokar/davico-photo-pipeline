@@ -32,7 +32,6 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
-from PIL import Image
 
 from pipeline.utils.exif import read_folder
 from pipeline.state import SessionState, GroupType

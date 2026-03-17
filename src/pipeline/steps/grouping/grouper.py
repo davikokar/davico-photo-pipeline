@@ -19,6 +19,7 @@ Algorithm overview
 
 import statistics
 from pathlib import Path
+from typing import Optional
 
 from pipeline.state import SessionState, GroupType
 from pipeline.utils.exif import ExifData, read_folder
@@ -43,6 +44,11 @@ EV_VARIATION_THRESHOLD: float = 0.8
 
 # Tolerance when comparing focal lengths across panorama positions (mm)
 FOCAL_LENGTH_TOLERANCE: float = 1.0
+
+# Enable visual overlap check (ORB + RANSAC) to confirm panorama pairs.
+# When True, time+focal are pre-filters; the visual check is the final arbiter.
+# When False, behaviour is identical to the original (time+focal only).
+PANO_VISUAL_CHECK: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +83,22 @@ class Bracket:
         if len(evs) < 2:
             return 0.0
         return max(evs) - min(evs)
+
+    @property
+    def representative_shot(self) -> ExifData:
+        """
+        Return the shot best suited for visual comparison (e.g. panorama check).
+
+        For HDR brackets: the shot whose EV is closest to 0 (middle exposure).
+        For single shots: the only shot.
+        The middle exposure has the most detail in both shadows and highlights,
+        giving feature detectors the most to work with.
+        """
+        if len(self.shots) == 1:
+            return self.shots[0]
+        with_ev = [(abs(s.ev or 0.0), i) for i, s in enumerate(self.shots)]
+        _, idx  = min(with_ev)
+        return self.shots[idx]
 
     @property
     def is_hdr(self) -> bool:
@@ -166,32 +188,87 @@ def _same_focal(a: Bracket, b: Bracket, tol: float) -> bool:
 
 
 def _form_panorama_groups(
-    brackets: list[Bracket],
-    max_pano_gap: float,
-    focal_tol: float,
+    brackets:      list[Bracket],
+    max_pano_gap:  float,
+    focal_tol:     float,
+    pano_cfg=None,   # PanoCheckConfig | None
+    log=None,
 ) -> list[PanoramaGroup]:
     """
     Cluster brackets into panorama groups.
 
-    A new group starts when:
-    - the gap between end of last bracket and start of next exceeds max_pano_gap, OR
-    - the focal length changes significantly
+    A new group starts when any of the following conditions is met:
+      1. Time gap between brackets exceeds max_pano_gap, OR
+      2. Focal length changes significantly, OR
+      3. (if PANO_VISUAL_CHECK enabled) Visual overlap check confidently
+         determines the two representative shots are NOT a panoramic pair.
+
+    Condition 3 uses ORB feature matching + RANSAC homography to verify
+    that consecutive brackets have a valid horizontal or vertical overlap.
+    It only overrides the grouping decision when confidence exceeds
+    PanoCheckConfig.min_confidence_to_override — otherwise the time+focal
+    result stands (graceful fallback for low-texture scenes).
     """
     if not brackets:
         return []
+
+    if log is None:
+        log = logger
+
+    # Import here to avoid circular dependency at module load time
+    visual_check_enabled = PANO_VISUAL_CHECK and pano_cfg is not None
+    if visual_check_enabled:
+        from pipeline.steps.grouping.pano_checker import (
+            check_panoramic_overlap, PanoCheckConfig
+        )
 
     groups: list[PanoramaGroup] = []
     current: list[Bracket] = [brackets[0]]
 
     for prev, curr in zip(brackets, brackets[1:]):
-        gap = curr.start_time - prev.end_time
+        gap     = curr.start_time - prev.end_time
         same_fl = _same_focal(prev, curr, focal_tol)
 
-        if gap <= max_pano_gap and same_fl:
-            current.append(curr)
-        else:
+        # ── Pre-filter: time and focal length ──────────────────────────
+        if gap > max_pano_gap or not same_fl:
+            reason = f"gap={gap:.1f}s>{max_pano_gap}s" if gap > max_pano_gap else "focal change"
+            log.debug(f"  New group: {reason}")
             groups.append(PanoramaGroup(current))
             current = [curr]
+            continue
+
+        # ── Visual check (optional) ────────────────────────────────────
+        if visual_check_enabled:
+            img_a = prev.representative_shot.path
+            img_b = curr.representative_shot.path
+            vc    = check_panoramic_overlap(img_a, img_b, cfg=pano_cfg, log=log)
+
+            if vc.confidence >= pano_cfg.min_confidence_to_override:
+                if not vc.is_panoramic_overlap:
+                    log.debug(
+                        f"  New group (visual ✗): {prev.representative_shot.path.name}"
+                        f" ↔ {curr.representative_shot.path.name} — {vc.reason}"
+                    )
+                    groups.append(PanoramaGroup(current))
+                    current = [curr]
+                    continue
+                else:
+                    log.debug(
+                        f"  Same group (visual ✓): {vc.direction} "
+                        f"overlap={vc.overlap_pct:.0f}%"
+                    )
+            else:
+                # Low confidence → treat as NOT panoramic (conservative choice)
+                log.debug(
+                    f"  New group (visual low-conf {vc.confidence:.2f}): "
+                    f"{prev.representative_shot.path.name} ↔ "
+                    f"{curr.representative_shot.path.name} — {vc.reason}"
+                )
+                groups.append(PanoramaGroup(current))
+                current = [curr]
+                continue
+
+        current.append(curr)
 
     groups.append(PanoramaGroup(current))
     return groups
@@ -223,8 +300,16 @@ def run_grouper(
     focal_tol    = float(cfg.get("focal_length_tolerance", FOCAL_LENGTH_TOLERANCE))
     ev_thresh    = float(cfg.get("ev_variation_threshold", EV_VARIATION_THRESHOLD))
 
-    # Override module-level constants if config provides values
-    # (done via local variables passed into functions)
+    # Build PanoCheckConfig from the 'grouper.pano_check' sub-section.
+    # If the key is absent or pano_visual_check=false, visual checking is disabled.
+    pano_cfg = None
+    if cfg.get("pano_visual_check", PANO_VISUAL_CHECK):
+        from pipeline.steps.grouping.pano_checker import PanoCheckConfig
+        pc_dict  = cfg.get("pano_check", {})
+        pano_cfg = PanoCheckConfig.from_dict(pc_dict)
+        logger.info("Panorama visual check: ENABLED")
+    else:
+        logger.info("Panorama visual check: disabled (pano_visual_check=false)")
 
     # 1. Read all EXIF
     shots = read_folder(Path(input_dir))
@@ -249,7 +334,7 @@ def run_grouper(
         logger.debug(f"  {b}")
 
     # 3. Group into panorama sequences
-    pano_groups = _form_panorama_groups(brackets, max_pano_gap, focal_tol)
+    pano_groups = _form_panorama_groups(brackets, max_pano_gap, focal_tol, pano_cfg=pano_cfg, log=logger)
     logger.info(f"Formed {len(pano_groups)} group(s)")
 
     # 4. Register in state

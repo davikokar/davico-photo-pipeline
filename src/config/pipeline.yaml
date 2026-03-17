@@ -3,10 +3,36 @@ pipeline:
   output: ./output
   keep_intermediates: true   # set to false in production to save disk space
 
+grouper:
+  max_hdr_gap: 2.0
+  max_pano_gap: 10.0
+  focal_length_tolerance: 1.0
+  ev_variation_threshold: 0.8
+
+  # Visual panorama check — ORB feature matching + RANSAC homography.
+  # Set to false to disable and rely only on time+focal criteria.
+  pano_visual_check: true
+
+  # Fine-tuning (only used when pano_visual_check: true).
+  pano_check:
+    analysis_width:   800    # px to resize images to before feature detection
+    orb_n_features:   1000   # ORB keypoints per image
+    lowe_ratio:       0.75   # Lowe ratio test for match filtering
+    min_matches:      12     # min good matches to attempt homography
+    min_inliers:      15     # min RANSAC inliers to trust the homography
+    scale_min:        0.85   # acceptable zoom-change range
+    scale_max:        1.15
+    max_rotation_deg: 20.0   # max tilt between shots (degrees)
+    direction_dominance: 0.60  # fraction of motion that must be H or V
+    overlap_min:      0.15   # min overlap (< = different scene)
+    overlap_max:      0.85   # max overlap (> = duplicate/burst shot)
+    min_confidence_to_override: 0.40  # fallback to time+focal if below this
+
+
 steps:
   hdr:
     # ── Required ──────────────────────────────────────────────────────────
-    photomatix_exe: "C:\\Program Files\\PhotomatixPro4\\PhotomatixCL.exe"
+    photomatix_exe: "C:\\Program Files\\Photomatix\\PhotomatixCL.exe"
 
     # ── Strategy B (RAW-derived brackets) ─────────────────────────────────
     # Set to the folder containing your RAW files (same stem as JPEGs).
@@ -20,12 +46,26 @@ steps:
     styles:
       - natural
       - realistic
-      - photographic
-    xmp_settings: "..\\hdr\\photographic.xmp"    # path to .xmp for photographic/tone-compressor style
+    xmp_settings: ""    # path to .xmp for photographic/tone-compressor style
 
     # ── Ghost detection ───────────────────────────────────────────────────
-    # If ghost area > ghost_threshold_pct, Strategy A and B are triggered.
-    ghost_threshold_pct: 0.5
+    # Strategy A and B are triggered only if ghost_area_min_pct is exceeded.
+    #
+    # ghost_area_min_pct     % of image area that must be flagged to declare
+    #                        "has ghosts". Raise to ignore small ghosts
+    #                        (a leaf, a distant car). Default: 1.5
+    #
+    # ghost_abs_variance_floor  minimum absolute inter-frame variance for a
+    #                        pixel to qualify. Raise to ignore high-contrast
+    #                        texture or subtle motion. Default: 50
+    #                        Suggested range to try: 30 (strict) – 150 (lenient)
+    #
+    # ghost_variance_percentile  only the top (100-X)% of valid pixels by
+    #                        variance are candidates. Raise to reduce
+    #                        the number of flagged pixels. Default: 98
+    ghost_area_min_pct:          1.5
+    ghost_abs_variance_floor:   50.0
+    ghost_variance_percentile:  98.0
 
     # ── Common Photomatix options ─────────────────────────────────────────
     align: true             # -a3  feature-based alignment
@@ -34,14 +74,14 @@ steps:
     # noise_strength: 100   # -nr  50-150, leave commented for default
 
     # ── Fusion/Natural Adjusted params ───────────────────────────────────
-    natural:                  # -2 
+    natural:
       accentuation:     5.0   # -2a  range -10 to +10
-      blending_point:   -6.0   # -2b  range -10 to +10
+      blending_point:  -6.0   # -2b  range -10 to +10
       color_saturation: 2.0   # -2c  range -10 to +10
       sharpness:        5.0   # -2h  range   0 to +10
       black_point:      6.0   # -2k  range   0 to +10
       midtone:          2.0   # -2m  range -10 to +10
-      shadows:          6.0   # -2s  range -10 to +10
+      shadows:          6.0   # -2s  range   0 to +10
       white_point:      6.0   # -2w  range   0 to +10
 
     # ── Fusion/Realistic params ───────────────────────────────────────────
