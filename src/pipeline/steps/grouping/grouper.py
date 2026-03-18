@@ -312,7 +312,7 @@ def run_grouper(
         logger.info("Panorama visual check: disabled (pano_visual_check=false)")
 
     # 1. Read all EXIF
-    shots = read_folder(Path(input_dir))
+    shots = read_folder(Path(input_dir), config=config)
     if not shots:
         logger.warning(f"No JPEG files found in {input_dir}")
         return []

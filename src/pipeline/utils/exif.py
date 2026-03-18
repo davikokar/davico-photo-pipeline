@@ -10,6 +10,7 @@ which is often missing or unreliable.
 import math
 import subprocess
 import json
+import yaml
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -94,7 +95,25 @@ def compute_ev(aperture: float, shutter: float, iso: int) -> float:
 # EXIF reader — uses exiftool via subprocess
 # ---------------------------------------------------------------------------
 
-def read_exif(path: Path) -> ExifData | None:
+def _get_exiftool_path(config: dict | None = None) -> str:
+    """
+    Get the exiftool executable path from config or fallback to PATH.
+    
+    Args:
+        config: Pipeline configuration dict. If provided, looks for
+                config['grouper']['exitool_exe'] (note the typo in config key).
+    
+    Returns:
+        Path string to exiftool executable, or "exiftool" to use PATH.
+    """
+    if config and "grouper" in config:
+        exiftool_path = config.get("grouper", {}).get("exitool_exe")
+        if exiftool_path:
+            return exiftool_path
+    return "exiftool"
+
+
+def read_exif(path: Path, config: dict | None = None) -> ExifData | None:
     """
     Read EXIF metadata from a JPEG file using exiftool.
 
@@ -103,6 +122,7 @@ def read_exif(path: Path) -> ExifData | None:
 
     Args:
         path: Path to JPEG file.
+        config: Optional pipeline configuration dict with exiftool path.
 
     Returns:
         ExifData instance, or None if file cannot be read.
@@ -113,8 +133,9 @@ def read_exif(path: Path) -> ExifData | None:
         return None
 
     try:
+        exiftool_exe = _get_exiftool_path(config)
         result = subprocess.run(
-            ["exiftool", "-json", "-n",          # -n: numeric output (no units)
+            [exiftool_exe, "-json", "-n",          # -n: numeric output (no units)
              "-DateTimeOriginal",
              "-SubSecTimeOriginal",
              "-FocalLength",
@@ -267,11 +288,16 @@ def _ratio_to_float(v) -> float | None:
     return _to_float(v)
 
 
-def read_folder(folder: Path, extensions: tuple = (".jpg", ".jpeg")) -> list[ExifData]:
+def read_folder(folder: Path, extensions: tuple = (".jpg", ".jpeg"), config: dict | None = None) -> list[ExifData]:
     """
     Read EXIF for all matching files in a folder, sorted by timestamp.
 
     Files with no timestamp are sorted to the end by filename.
+    
+    Args:
+        folder: Directory containing JPEG files.
+        extensions: Tuple of file extensions to match (default: .jpg, .jpeg).
+        config: Optional pipeline configuration dict with exiftool path.
     """
     folder = Path(folder)
     files  = sorted(
@@ -282,7 +308,7 @@ def read_folder(folder: Path, extensions: tuple = (".jpg", ".jpeg")) -> list[Exi
     logger.info(f"Reading EXIF from {len(files)} files in {folder}")
     results = []
     for f in files:
-        exif = read_exif(f)
+        exif = read_exif(f, config=config)
         if exif:
             results.append(exif)
 
