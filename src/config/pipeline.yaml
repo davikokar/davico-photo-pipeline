@@ -4,6 +4,8 @@ pipeline:
   keep_intermediates: true   # set to false in production to save disk space
 
 grouper:
+  exitool_exe: "C:\\temp\\exiftool.exe"
+
   max_hdr_gap: 2.0
   max_pano_gap: 10.0
   focal_length_tolerance: 1.0
