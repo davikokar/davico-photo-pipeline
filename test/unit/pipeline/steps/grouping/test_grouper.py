@@ -20,6 +20,7 @@ from pipeline.state import SessionState, GroupType
 from pipeline.steps.grouping.grouper import (
     _form_brackets,
     _form_panorama_groups,
+    _round_to_third,
     grouping_report,
     EV_VARIATION_THRESHOLD,
     MAX_HDR_GAP,
@@ -292,6 +293,110 @@ def test_long_exposure_hdr():
     assert len(groups[0].all_shots) == 3
     logger.info("✅ test_long_exposure_hdr passed")
 
+
+# ---------------------------------------------------------------------------
+# Step offset tests
+# ---------------------------------------------------------------------------
+
+def test_round_to_third():
+    """_round_to_third rounds to nearest 1/3 stop."""
+    assert _round_to_third(0.0) == 0.0
+    assert _round_to_third(2.0) == 2.0
+    assert _round_to_third(-2.0) == -2.0
+    assert _round_to_third(1.0) == 1.0
+    assert _round_to_third(0.33) == 0.33
+    assert _round_to_third(0.34) == 0.33
+    assert _round_to_third(0.5) == 0.67   # 0.5 rounds to 2/3 (banker's rounding)
+    assert _round_to_third(0.6) == 0.67
+    assert _round_to_third(-0.6) == -0.67
+    assert _round_to_third(2.3) == 2.33
+    assert _round_to_third(-2.3) == -2.33
+    assert _round_to_third(2.7) == 2.67
+    logger.info("✅ test_round_to_third passed")
+
+
+def test_step_offsets_hdr_3():
+    """3-shot HDR bracket: -2, 0, +2 → offsets -2.0, 0.0, +2.0."""
+    shots = [
+        make_shot("IMG_001.jpg", t=0.0, ev=-2),
+        make_shot("IMG_002.jpg", t=0.4, ev= 0),
+        make_shot("IMG_003.jpg", t=0.8, ev=+2),
+    ]
+    brackets = _form_brackets(shots, MAX_HDR_GAP)
+    assert len(brackets) == 1
+    offsets = brackets[0].step_offsets
+    assert offsets[0] == {"step_offset":  2.0, "reference_shot": False}
+    assert offsets[1] == {"step_offset":  0.0, "reference_shot": True}
+    assert offsets[2] == {"step_offset": -2.0, "reference_shot": False}
+    logger.info("✅ test_step_offsets_hdr_3 passed")
+
+
+def test_step_offsets_hdr_5():
+    """5-shot HDR bracket: -4, -2, 0, +2, +4 → offsets relative to central."""
+    shots = [
+        make_shot("IMG_001.jpg", t=0.0, ev=-4),
+        make_shot("IMG_002.jpg", t=0.4, ev=-2),
+        make_shot("IMG_003.jpg", t=0.8, ev= 0),
+        make_shot("IMG_004.jpg", t=1.2, ev=+2),
+        make_shot("IMG_005.jpg", t=1.6, ev=+4),
+    ]
+    brackets = _form_brackets(shots, MAX_HDR_GAP)
+    assert len(brackets) == 1
+    offsets = brackets[0].step_offsets
+    assert offsets[0] == {"step_offset":  4.0, "reference_shot": False}
+    assert offsets[1] == {"step_offset":  2.0, "reference_shot": False}
+    assert offsets[2] == {"step_offset":  0.0, "reference_shot": True}
+    assert offsets[3] == {"step_offset": -2.0, "reference_shot": False}
+    assert offsets[4] == {"step_offset": -4.0, "reference_shot": False}
+    logger.info("✅ test_step_offsets_hdr_5 passed")
+
+
+def test_step_offsets_single_shot():
+    """Single shot → step_offset=0, reference_shot=True."""
+    shots = [make_shot("IMG_001.jpg", t=0.0, ev=0)]
+    brackets = _form_brackets(shots, MAX_HDR_GAP)
+    offsets = brackets[0].step_offsets
+    assert len(offsets) == 1
+    assert offsets[0] == {"step_offset": 0.0, "reference_shot": True}
+    logger.info("✅ test_step_offsets_single_shot passed")
+
+
+def test_step_offsets_fractional_ev():
+    """HDR with 1/3 stop EV spacing."""
+    shots = [
+        make_shot("IMG_001.jpg", t=0.0, ev=-1.33),
+        make_shot("IMG_002.jpg", t=0.4, ev=-0.67),
+        make_shot("IMG_003.jpg", t=0.8, ev= 0.0),
+        make_shot("IMG_004.jpg", t=1.2, ev=+0.67),
+        make_shot("IMG_005.jpg", t=1.6, ev=+1.33),
+    ]
+    brackets = _form_brackets(shots, MAX_HDR_GAP)
+    offsets = brackets[0].step_offsets
+    assert offsets[0]["step_offset"] == 1.33
+    assert offsets[1]["step_offset"] == 0.67
+    assert offsets[2]["step_offset"] == 0.0
+    assert offsets[2]["reference_shot"] is True
+    assert offsets[3]["step_offset"] == -0.67
+    assert offsets[4]["step_offset"] == -1.33
+    logger.info("✅ test_step_offsets_fractional_ev passed")
+
+
+def test_step_offsets_asymmetric_bracket():
+    """Asymmetric bracket: -1, 0, +2 → reference is the median (0)."""
+    shots = [
+        make_shot("IMG_001.jpg", t=0.0, ev=-1),
+        make_shot("IMG_002.jpg", t=0.4, ev= 0),
+        make_shot("IMG_003.jpg", t=0.8, ev=+2),
+    ]
+    brackets = _form_brackets(shots, MAX_HDR_GAP)
+    offsets = brackets[0].step_offsets
+    # Median EV is 0, so reference is shot at ev=0
+    assert offsets[1]["reference_shot"] is True
+    assert offsets[0]["step_offset"] == 1.0
+    assert offsets[1]["step_offset"] == 0.0
+    assert offsets[2]["step_offset"] == -2.0
+    logger.info("✅ test_step_offsets_asymmetric_bracket passed")
+
 if __name__ == "__main__":
     tests = [
         test_single,
@@ -304,6 +409,12 @@ if __name__ == "__main__":
         test_mixed_session,
         test_long_exposure_hdr,
         test_with_state,
+        test_round_to_third,
+        test_step_offsets_hdr_3,
+        test_step_offsets_hdr_5,
+        test_step_offsets_single_shot,
+        test_step_offsets_fractional_ev,
+        test_step_offsets_asymmetric_bracket,
     ]
     failed = 0
     for t in tests:

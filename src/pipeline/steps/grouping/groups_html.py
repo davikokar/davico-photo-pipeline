@@ -318,7 +318,7 @@ def generate_review_html(
     width: auto;
     pointer-events: none;
   }}
-  .shot-ev {{
+  .shot-step {{
     position: absolute; top: 4px; left: 4px;
     font-family: var(--mono); font-size: 10px;
     background: rgba(0,0,0,0.75);
@@ -326,17 +326,26 @@ def generate_review_html(
     padding: 2px 5px; border-radius: 3px;
     pointer-events: none;
   }}
+  .shot-thumb.reference-shot {{
+    box-shadow: inset 0 -3px 0 0 var(--accent);
+  }}
 
   .bracket-footer {{
-    padding: 5px 8px;
+    display: flex;
+    border-top: 1px solid var(--border);
+  }}
+  .bracket-footer .shot-name {{
+    flex: 1 1 0;
+    min-width: 0;
     font-family: var(--mono); font-size: 10px;
     color: var(--muted);
-    border-top: 1px solid var(--border);
-    white-space: nowrap;
+    padding: 5px 4px;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 280px;
+    white-space: nowrap;
+    border-right: 1px solid var(--border);
   }}
+  .bracket-footer .shot-name:last-child {{ border-right: none; }}
 
   /* ── Empty drop zone hint ── */
   .drop-hint {{
@@ -519,14 +528,16 @@ function buildBracketCard(bracket, groupIdx, bracketIdx) {{
   const shotsRow = el('div', 'bracket-shots');
   bracket.shots.forEach(shot => {{
     const thumb = el('div', 'shot-thumb');
+    if (shot.reference_shot) thumb.classList.add('reference-shot');
     const img = document.createElement('img');
     img.src = THUMBS[shot.filename] || '';
     img.title = shot.filename;
     thumb.appendChild(img);
-    if (shot.ev !== null && shot.ev !== undefined) {{
-      const evBadge = el('span', 'shot-ev');
-      evBadge.textContent = (shot.ev >= 0 ? '+' : '') + shot.ev.toFixed(1);
-      thumb.appendChild(evBadge);
+    if (shot.step_offset !== null && shot.step_offset !== undefined) {{
+      const stepBadge = el('span', 'shot-step');
+      const v = shot.step_offset;
+      stepBadge.textContent = (v === 0 ? '0' : (v > 0 ? '+' : '') + v.toFixed(2).replace(/0$/, ''));
+      thumb.appendChild(stepBadge);
     }}
     shotsRow.appendChild(thumb);
   }});
@@ -560,9 +571,12 @@ function buildBracketCard(bracket, groupIdx, bracketIdx) {{
   card.appendChild(actions);
 
   const footer = el('div', 'bracket-footer');
-  const names = bracket.shots.map(s => s.filename).join('  ');
-  footer.textContent = names;
-  footer.title = names;
+  bracket.shots.forEach(shot => {{
+    const nameEl = el('span', 'shot-name');
+    nameEl.textContent = shot.filename;
+    nameEl.title = shot.filename;
+    footer.appendChild(nameEl);
+  }});
   card.appendChild(footer);
 
   card.addEventListener('dragstart', e => {{

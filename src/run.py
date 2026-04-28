@@ -27,7 +27,9 @@ def load_config(path: Path) -> dict:
         logger.warning(f"Config file not found: {path} — using defaults")
         return {}
     with open(path) as f:
-        return yaml.safe_load(f) or {}
+        config = yaml.safe_load(f) or {}
+    config["__config_dir__"] = str(path.parent.resolve())
+    return config
 
 
 # ---------------------------------------------------------------------------
@@ -40,11 +42,15 @@ def cmd_process(args):
         logger.error(f"Input directory not found: {input_dir}")
         sys.exit(1)
 
+    raw_dir = Path(args.raw_dir).resolve()
+    if not raw_dir.exists():
+        raw_dir = ""
+
     config = load_config(Path(args.config))
     workspace = Path(config.get("pipeline", {}).get("workspace", "./workspace"))
     output    = Path(config.get("pipeline", {}).get("output",    "./output"))
 
-    state = SessionState(workspace=workspace, input_dir=str(input_dir))
+    state = SessionState(workspace=workspace, input_dir=str(input_dir), raw_dir=str(raw_dir))
     orchestrator = Orchestrator(state=state, config=config, output_dir=output)
 
     logger.info(f"Processing: {input_dir}")
@@ -111,6 +117,7 @@ def build_parser() -> argparse.ArgumentParser:
     # process
     p_process = sub.add_parser("process", help="Start a new pipeline session")
     p_process.add_argument("input_dir", help="Folder containing source photos")
+    p_process.add_argument("raw_dir", help="Folder containing raw photos")
 
     # resume
     p_resume = sub.add_parser("resume", help="Resume an interrupted session")

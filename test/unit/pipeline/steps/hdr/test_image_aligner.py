@@ -12,7 +12,7 @@ import shutil
 import pytest
 import cv2
 
-from pipeline.steps.hdr.image_aligner import align_images, align_images_advanced
+from pipeline.steps.hdr.hdr_result_merger import align_images, align_images_advanced
 from pipeline.utils.logger import get_logger
 
 logger = get_logger("image_aligner_test")

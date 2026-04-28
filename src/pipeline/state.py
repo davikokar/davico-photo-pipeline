@@ -41,6 +41,7 @@ class GroupType(str, Enum):
 
 PIPELINE_STEPS = [
     "grouping",
+    "raw_to_jpg",
     "hdr_merge",
     "stitch",
     "geometry",
@@ -68,12 +69,13 @@ def new_group(group_id: str, files: list[str], group_type: GroupType) -> dict:
     }
 
 
-def new_session(session_id: str, input_dir: str) -> dict:
+def new_session(session_id: str, input_dir: str, raw_dir: str) -> dict:
     return {
         "session":    session_id,
         "created_at": datetime.now().isoformat(),
         "updated_at": datetime.now().isoformat(),
         "input_dir":  input_dir,
+        "raw_dir":    raw_dir,
         "groups":     {},
         "finished":   False,
     }
@@ -90,7 +92,7 @@ class SessionState:
     All mutations call save() automatically to keep the file in sync.
     """
 
-    def __init__(self, workspace: Path, session_id: str | None = None, input_dir: str = ""):
+    def __init__(self, workspace: Path, session_id: str | None = None, input_dir: str = "", raw_dir: str = ""):
         self.workspace  = Path(workspace)
         self.session_id = session_id or datetime.now().strftime("%Y%m%d_%H%M%S")
         self.session_dir = self.workspace / self.session_id
@@ -107,7 +109,7 @@ class SessionState:
             self._state = self._load()
             logger.info(f"Resumed session {self.session_id} from {self.state_file}")
         else:
-            self._state = new_session(self.session_id, input_dir)
+            self._state = new_session(self.session_id, input_dir, raw_dir)
             self.save()
             logger.info(f"Created new session {self.session_id}")
 
@@ -210,6 +212,7 @@ class SessionState:
         lines.append(f"\nSession:    {s['session']}")
         lines.append(f"Created:    {s['created_at'][:19]}")
         lines.append(f"Input dir:  {s['input_dir']}")
+        lines.append(f"Raw dir:    {s['raw_dir']}")
         lines.append(f"Finished:   {s['finished']}")
         lines.append(f"\nGroups ({len(s['groups'])}):")
 

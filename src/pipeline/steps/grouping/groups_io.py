@@ -168,12 +168,16 @@ def panorama_groups_to_json(pano_groups: list, input_dir: Path) -> list[dict]:
         brackets = []
         for bracket in pg.brackets:
             shots = []
-            for shot in bracket.shots:
-                shots.append({
-                    "filename": shot.path.name,
-                    "ev":       round(shot.ev, 2) if shot.ev is not None else None,
-                    "shutter":  shot.shutter,
-                })
+            offsets = bracket.step_offsets
+            for shot, offset_info in zip(bracket.shots, offsets):
+                shot_dict = {
+                    "filename":       shot.path.name,
+                    "ev":             round(shot.ev, 2) if shot.ev is not None else None,
+                    "shutter":        shot.shutter,
+                    "step_offset":    offset_info["step_offset"],
+                    "reference_shot": offset_info["reference_shot"],
+                }
+                shots.append(shot_dict)
             brackets.append({"shots": shots})
 
         groups_data.append({

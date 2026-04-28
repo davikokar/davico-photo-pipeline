@@ -1,13 +1,14 @@
 
 # Tool description
 
-This tool automates the processing of photography post processing. The post processing is organized
-in subsequent steps. Some steps will require user approval. This is the list of steps:
+This tool automates the processing of photography post processing. The post processing 
+is organized in subsequent steps. Some steps will require user approval. This is the list 
+of steps:
 
 ## Grouping
 
-In the first step a folder containing jpg images is processed in order to group the images according
-to this logic.
+In the first step a folder containing jpg images is processed in order to group the images 
+according to this logic.
 - Images con be single images.
 - Images con be part of a panoramic group (from 2 to n images)
 - Images con be part of a hdr group (from 3 to 5)
@@ -24,10 +25,18 @@ Once the grouping is confirmed the user can save it and place it in the session 
 
 ## Raw Conversion to jgp
 
-The second step is the conversion of raw files to jpg. This step can be skipped for aerial DJI images, it is necessary only for Canon images, and only if raw images are available.
+The second step is the conversion of raw files to jpg. This step can be skipped for aerial 
+DJI images, it is necessary only for Canon images, and only if raw images are available.
 The logic is as follows:
-- For images that are not part of a hdr group: the raw file is converted to jpg 3 times, with 3 different recipes: the 0 Exp recipe, the -2 Exp recipe, the +2 Exp recipe, in order to obtain 3 exposures of the same image.
-- For images that are part of a hdr group: all images are converted with the 0 Exp recipe. The 0 Exp image, is also converted with the other recipes: -2 Exp and + 2 Exp, in case there are three images. The +2 Exp and the -2 Exp images are also converted with, respectively, the -2 Exp and the + 2 Exp recipe.
+- For images that are not part of a hdr group: the raw file is converted to jpg 3 times, 
+with 3 different recipes: the 0 Exp recipe, the -2 Exp recipe, the +2 Exp recipe, in order 
+to obtain 3 exposures of the same image.
+- For images that are part of a hdr group: all images are converted with the 0 Exp recipe. 
+The 0 Exp image, is also converted with the other available recipes: for example in case
+of a three bracketed hdr sequence these would be the -2 Exp and + 2 Exp recipes. 
+The +2 Exp and the -2 Exp images are also converted with, respectively, 
+the -2 Exp and the + 2 Exp recipe in order to obtain an exposure-normalized image of
+the overexposed and underexposed images.
 
 | Image      | Exposure | Recipe 0 | Recipe -1 | Recipe +1 | Recipe -2 | Recipe +2 | 
 |------------|----------|----------|-----------|-----------|-----------|-----------|
@@ -94,9 +103,14 @@ A json file with the new file structure is created and saved in the session fold
 
 This step is applied only to hdr groups. If there are not hdr groups this step is skipped.
 
-Here there are two different scenarios, depending if there were raw images available or not. The simple case is there were not raw images and the only available images are the bracketed shots.
+Here there are two different scenarios, depending if there were raw images available or not. 
+The simple case is there were not raw images and the only available images are the bracketed shots.
 
-The images converted with Recipe 0, they are the "normal" images and will be used to generate the hdr image with the best dynamic range, but with the worst ghosting. The images converted from the Exposure 0 (IMG_01.CR2 in the example here above) using all relevant Recipes, will be used to generate an hdr merge with the worst dynamic range (because it is obtained from a single raw), but the best ghosting (no ghosts, since one image is used).
+The images converted with Recipe 0, they are the "normal" images and will be used to generate the 
+hdr image with the best dynamic range, but with the worst ghosting. The images converted from the 
+Exposure 0 (IMG_01.CR2 in the example here above) using all relevant Recipes, will be used to 
+generate an hdr merge with the worst dynamic range (because it is obtained from a single raw), 
+but the best ghosting (no ghosts, since one image is used).
 
 
 

@@ -28,6 +28,20 @@ from pipeline.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+def _round_to_third(value: float) -> float:
+    """Round a float to the nearest 1/3 stop.
+
+    Valid results: 0, ±0.33, ±0.67, ±1, ±1.33, … etc.
+    Uses banker's-style rounding to the closest third.
+
+    :param float value: Raw EV offset
+    :return: Value rounded to nearest 1/3
+    :rtype: float
+    """
+    thirds = round(value * 3)
+    return round(thirds / 3, 2)
+
+
 # ---------------------------------------------------------------------------
 # Tunable thresholds — exposed here so they can be overridden via config
 # ---------------------------------------------------------------------------
@@ -85,20 +99,57 @@ class Bracket:
         return max(evs) - min(evs)
 
     @property
-    def representative_shot(self) -> ExifData:
+    def reference_shot(self) -> ExifData:
         """
-        Return the shot best suited for visual comparison (e.g. panorama check).
+        Return the shot closest to median EV (the central exposure).
 
-        For HDR brackets: the shot whose EV is closest to 0 (middle exposure).
         For single shots: the only shot.
         The middle exposure has the most detail in both shadows and highlights,
         giving feature detectors the most to work with.
         """
+        return self.shots[self.reference_shot_index]
+
+    @property
+    def reference_shot_index(self) -> int:
+        """Index of the shot closest to median EV (the central exposure)."""
         if len(self.shots) == 1:
-            return self.shots[0]
-        with_ev = [(abs(s.ev or 0.0), i) for i, s in enumerate(self.shots)]
-        _, idx  = min(with_ev)
-        return self.shots[idx]
+            return 0
+        evs = [s.ev for s in self.shots]
+        if all(e is None for e in evs):
+            return len(self.shots) // 2
+        median_ev = statistics.median(e for e in evs if e is not None)
+        _, idx = min((abs((s.ev or 0.0) - median_ev), i) for i, s in enumerate(self.shots))
+        return idx
+
+    @property
+    def step_offsets(self) -> list[dict]:
+        """Compute per-shot step offsets from the reference (central) exposure.
+
+        Each entry is a dict with:
+          - ``step_offset``: float rounded to nearest 1/3 stop (0, ±0.33, ±0.67, ±1, …)
+          - ``reference_shot``: True only for the central exposure
+
+        For non-HDR brackets (single shot or no EV variation) all shots
+        get step_offset=0.0 and the first shot is marked as reference.
+
+        :return: list of dicts, one per shot, in the same order as self.shots
+        :rtype: list[dict]
+        """
+        ref_idx = self.reference_shot_index
+        ref_ev = self.shots[ref_idx].ev
+
+        result = []
+        for i, shot in enumerate(self.shots):
+            is_ref = (i == ref_idx)
+            if not self.is_hdr or ref_ev is None or shot.ev is None:
+                result.append({"step_offset": 0.0, "reference_shot": is_ref})
+            else:
+                raw_offset = ref_ev - shot.ev
+                result.append({
+                    "step_offset": _round_to_third(raw_offset),
+                    "reference_shot": is_ref,
+                })
+        return result
 
     @property
     def is_hdr(self) -> bool:
@@ -239,15 +290,15 @@ def _form_panorama_groups(
 
         # ── Visual check (optional) ────────────────────────────────────
         if visual_check_enabled:
-            img_a = prev.representative_shot.path
-            img_b = curr.representative_shot.path
+            img_a = prev.reference_shot.path
+            img_b = curr.reference_shot.path
             vc    = check_panoramic_overlap(img_a, img_b, cfg=pano_cfg, log=log)
 
             if vc.confidence >= pano_cfg.min_confidence_to_override:
                 if not vc.is_panoramic_overlap:
                     log.debug(
-                        f"  New group (visual ✗): {prev.representative_shot.path.name}"
-                        f" ↔ {curr.representative_shot.path.name} — {vc.reason}"
+                        f"  New group (visual ✗): {prev.reference_shot.path.name}"
+                        f" ↔ {curr.reference_shot.path.name} — {vc.reason}"
                     )
                     groups.append(PanoramaGroup(current))
                     current = [curr]
@@ -261,8 +312,8 @@ def _form_panorama_groups(
                 # Low confidence → treat as NOT panoramic (conservative choice)
                 log.debug(
                     f"  New group (visual low-conf {vc.confidence:.2f}): "
-                    f"{prev.representative_shot.path.name} ↔ "
-                    f"{curr.representative_shot.path.name} — {vc.reason}"
+                    f"{prev.reference_shot.path.name} ↔ "
+                    f"{curr.reference_shot.path.name} — {vc.reason}"
                 )
                 groups.append(PanoramaGroup(current))
                 current = [curr]
@@ -279,7 +330,6 @@ def _form_panorama_groups(
 # ---------------------------------------------------------------------------
 
 def run_grouper(
-    input_dir: Path,
     state: SessionState,
     config: dict | None = None,
 ) -> list[PanoramaGroup]:
@@ -287,7 +337,6 @@ def run_grouper(
     Scan input_dir, detect groups, register them in state.
 
     Args:
-        input_dir: Folder with JPEG files.
         state:     Session state (groups will be added here).
         config:    Optional config dict (from pipeline.yaml 'grouper' section).
 
@@ -299,6 +348,8 @@ def run_grouper(
     max_pano_gap = float(cfg.get("max_pano_gap", MAX_PANO_GAP))
     focal_tol    = float(cfg.get("focal_length_tolerance", FOCAL_LENGTH_TOLERANCE))
     ev_thresh    = float(cfg.get("ev_variation_threshold", EV_VARIATION_THRESHOLD))
+
+    input_dir = Path(state.session["input_dir"])
 
     # Build PanoCheckConfig from the 'grouper.pano_check' sub-section.
     # If the key is absent or pano_visual_check=false, visual checking is disabled.
@@ -388,141 +439,13 @@ def grouping_report(pano_groups: list[PanoramaGroup]) -> str:
 
     return "\n".join(lines)
 
-
-def grouping_html_report(pano_groups: list[PanoramaGroup], output_path: Path) -> None:
-    """
-    Generate an HTML report with thumbnail previews of groups.
-
-    Each row displays one PanoramaGroup with:
-    - Group ID and type
-    - Thumbnails (100px height) of all shots in the group
-    - Basic group metadata (bracket count, shot count, etc.)
-
-    Args:
-        pano_groups: List of PanoramaGroup objects to visualize.
-        output_path: Path where the HTML file will be saved.
-    """
-    import base64
-    from io import BytesIO
-    from PIL import Image
-
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    def image_to_base64_thumbnail(img_path: Path, height: int = 100) -> str | None:
-        """
-        Convert an image to a base64-encoded thumbnail data URI.
-
-        Returns None if the image cannot be read.
-        """
-        try:
-            img = Image.open(img_path)
-            # Maintain aspect ratio
-            ratio = img.width / img.height
-            width = int(height * ratio)
-            img.thumbnail((width, height), Image.Resampling.LANCZOS)
-
-            # Convert to PNG bytes
-            buffer = BytesIO()
-            img.save(buffer, format="PNG")
-            buffer.seek(0)
-            b64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
-            return f"data:image/png;base64,{b64}"
-        except Exception as e:
-            logger.warning(f"Failed to create thumbnail for {img_path}: {e}")
-            return None
-
-    # Build HTML
-    html_lines = [
-        "<!DOCTYPE html>",
-        "<html lang='en'>",
-        "<head>",
-        "  <meta charset='UTF-8'>",
-        "  <meta name='viewport' content='width=device-width, initial-scale=1.0'>",
-        "  <title>Photo Pipeline - Grouping Report</title>",
-        "  <style>",
-        "    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 20px; background: #f5f5f5; }",
-        "    .container { max-width: 1400px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }",
-        "    h1 { color: #333; border-bottom: 2px solid #0066cc; padding-bottom: 10px; }",
-        "    .group { margin: 30px 0; padding: 20px; border-left: 4px solid #0066cc; background: #f9f9f9; border-radius: 4px; }",
-        "    .group-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; }",
-        "    .group-title { font-size: 18px; font-weight: bold; color: #333; }",
-        "    .group-type { display: inline-block; padding: 4px 12px; background: #0066cc; color: white; border-radius: 20px; font-size: 12px; font-weight: bold; margin-left: 10px; }",
-        "    .group-meta { font-size: 12px; color: #666; margin-right: auto; margin-left: 20px; }",
-        "    .thumbnails { display: flex; flex-wrap: wrap; gap: 10px; }",
-        "    .thumbnail { display: flex; flex-direction: column; border: 1px solid #ddd; border-radius: 4px; overflow: hidden; background: #eee; }",
-        "    .thumbnail img { display: block; height: 100px; flex-shrink: 0; }",
-        "    .thumbnail-label { background: rgba(0,0,0,0.7); color: white; font-size: 10px; padding: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }",
-        "    .bracket-separator { height: 100px; width: 2px; background: #ddd; margin: 0 5px; }",
-        "  </style>",
-        "</head>",
-        "<body>",
-        "  <div class='container'>",
-        f"    <h1>Photo Pipeline - Grouping Report ({len(pano_groups)} group{'s' if len(pano_groups) != 1 else ''})</h1>",
-    ]
-
-    for i, pg in enumerate(pano_groups):
-        group_id = f"group_{i+1:03d}"
-        group_type_label = pg.group_type.value.replace("_", " ").upper()
-
-        html_lines.extend([
-            "    <div class='group'>",
-            "      <div class='group-header'>",
-            f"        <span class='group-title'>{group_id}</span>",
-            f"        <span class='group-type'>{group_type_label}</span>",
-            f"        <span class='group-meta'>{len(pg.brackets)} bracket(s) • {len(pg.all_shots)} shot(s)</span>",
-            "      </div>",
-            "      <div class='thumbnails'>",
-        ])
-
-        for bracket_idx, bracket in enumerate(pg.brackets):
-            # Add bracket separator if not the first bracket
-            if bracket_idx > 0:
-                html_lines.append("        <div class='bracket-separator'></div>")
-
-            for shot in bracket.shots:
-                b64_uri = image_to_base64_thumbnail(shot.path)
-                if b64_uri:
-                    html_lines.extend([
-                        "        <div class='thumbnail'>",
-                        f"          <img src='{b64_uri}' alt='{shot.path.name}'>",
-                        f"          <div class='thumbnail-label'>{shot.path.name}</div>",
-                        "        </div>",
-                    ])
-                else:
-                    html_lines.extend([
-                        "        <div class='thumbnail'>",
-                        f"          <div style='height: 100px; display: flex; align-items: center; justify-content: center; color: #999;'>Error</div>",
-                        f"          <div class='thumbnail-label'>{shot.path.name}</div>",
-                        "        </div>",
-                    ])
-
-        html_lines.extend([
-            "      </div>",
-            "    </div>",
-        ])
-
-    html_lines.extend([
-        "  </div>",
-        "</body>",
-        "</html>",
-    ])
-
-    html_content = "\n".join(html_lines)
-    output_path.write_text(html_content, encoding="utf-8")
-    logger.info(f"HTML report generated: {output_path}")
-
-
-
 # ---------------------------------------------------------------------------
 # Export helpers — called by run_grouper after detection
 # ---------------------------------------------------------------------------
 
 def export_groups(
     pano_groups: list,
-    input_dir: Path,
-    session_dir: Path,
-    session_id: str,
+    state: SessionState,
 ) -> tuple:
     """
     Export detected groups to versioned JSON and generate HTML review page.
@@ -536,6 +459,10 @@ def export_groups(
         _next_version_number,
     )
     from pipeline.steps.grouping.groups_html import generate_review_html
+
+    input_dir = Path(state.session["input_dir"])
+    session_dir = Path(state.session["session_dir"])
+    session_id = state.session["session_id"]
 
     groups_data  = panorama_groups_to_json(pano_groups, input_dir)
     json_path    = save_groups_json(groups_data, session_dir, session_id, str(input_dir))

@@ -38,9 +38,25 @@ steps:
 
     # ── Strategy B (RAW-derived brackets) ─────────────────────────────────
     # Set to the folder containing your RAW files (same stem as JPEGs).
-    # Leave empty to disable Strategy B deghosting.
+    # Leave empty to disable RAW conversion for this session.
     raw_dir: ""
     dcraw_path: ""        # leave empty if dcraw_emu is on PATH
+
+    raw_to_jpg:
+      dpp4cli_exe: "C:\\tools\\dpp4cli\\dpp4cli.exe"
+      dpp4dir: ""
+      jpeg_quality: 100
+      format: jpg
+      verbose: false
+      raw_extensions:
+        - .cr2
+        - .cr3
+        - .crw
+        - .crf
+      recipes:
+        "0": "./config/hdr/dpp4_recipe_exp_0.dr4"
+        "-2": "./config/hdr/dpp4_recipe_exp_-2.dr4"
+        "+2": "./config/hdr/dpp4_recipe_exp_+2.dr4"
 
     # ── Styles to generate ────────────────────────────────────────────────
     # Options: natural, realistic, photographic

@@ -167,8 +167,8 @@ class Orchestrator:
         return len(self.state.all_groups()) > 0
 
     def _process_group(self, group: dict):
-        """Run HDR and stitch steps for a group."""
-        for step in ["hdr_merge", "stitch"]:
+        """Run RAW conversion, HDR merge, and stitch steps for a group."""
+        for step in ["raw_to_jpg", "hdr_merge", "stitch"]:
             self._dispatch_step(group, step)
 
     def _process_group_post_hdr(self, group: dict):
@@ -225,13 +225,11 @@ class Orchestrator:
         )
 
         input_dir = Path(self.state.session["input_dir"])
-        pano_groups = run_grouper(input_dir, self.state, self.config)
+        pano_groups = run_grouper(self.state, self.config)
 
         json_path, html_path = export_groups(
             pano_groups  = pano_groups,
-            input_dir    = input_dir,
-            session_dir  = self.state.session_dir,
-            session_id   = self.state.session_id,
+            state    = self.state,
         )
         self.logger.info(
             f"Grouping complete.\n"
@@ -277,6 +275,26 @@ class Orchestrator:
         # TODO: implement pipeline/steps/hdr_merger.py
         log.info("HDR merge (stub)")
         return None
+
+    def _run_raw_to_jpg(self, group: dict, log) -> str | None:
+        """Convert RAW files to JPEG derivatives required by the HDR step."""
+        from pipeline.steps.hdr.raw_to_jpg_converter import convert_group_from_groups_json
+
+        try:
+            return str(
+                convert_group_from_groups_json(
+                    session_dir=self.state.session_dir,
+                    group_id=group["id"],
+                    config=self.config,
+                    log=log,
+                )
+            )
+        except FileNotFoundError as exc:
+            self.state.step_skip(group["id"], "raw_to_jpg", reason=str(exc))
+            return None
+        except ValueError as exc:
+            self.state.step_skip(group["id"], "raw_to_jpg", reason=str(exc))
+            return None
 
     def _run_stitch(self, group: dict, log) -> str | None:
         """Stitch panoramic sequence."""
