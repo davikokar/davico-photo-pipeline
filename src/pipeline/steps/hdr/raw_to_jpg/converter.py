@@ -61,86 +61,95 @@ class ConversionRequest:
 		return self.output_dir / self.output_filename
 
 
-def convert_group_from_groups_json(session_dir: Path, group_id: str, config: dict, log=None) -> Path:
-	"""Convert one group using the latest groups JSON.
+def convert_all_groups_from_groups_json(
+    session_dir: Path,
+    raw_dir: str | Path | None,
+    config: dict,
+    log=None,
+) -> Path | None:
+    """Convert all groups using the latest groups JSON.
 
-	:param Path session_dir: Session directory containing groups JSON files
-	:param str group_id: Group identifier to convert
-	:param dict config: Full pipeline configuration
-	:param log: Optional logger or logger adapter
-	:return: Path to the aggregate raw conversion JSON
-	:rtype: Path
-	:raises FileNotFoundError: If RAW conversion is disabled or the group has no RAW files
-	:raises ValueError: If required recipes are missing or the group is not present
-	"""
-	log = log or logger
-	session_dir = Path(session_dir)
+    :param Path session_dir: Session directory containing groups JSON files
+    :param raw_dir: RAW directory path (from SessionState), or None to skip
+    :param dict config: Full pipeline configuration
+    :param log: Optional logger
+    :return: Path to aggregate raw conversion JSON, or None if skipped
+    :rtype: Path | None
+    """
+    log = log or logger
+    session_dir = Path(session_dir)
 
-	groups_payload = load_latest_groups_json(session_dir)
-	if groups_payload is None:
-		raise ValueError("no groups JSON found in session directory")
+    # (2) Skip if raw_dir not provided
+    if not raw_dir:
+        log.info("raw_to_jpg skipped: raw_dir not configured in session")
+        return None
+    raw_dir = Path(raw_dir)
+    if not raw_dir.exists():
+        log.info("raw_to_jpg skipped: raw_dir not found: %s", raw_dir)
+        return None
 
-	hdr_config = _get_hdr_config(config)
-	config_dir = _get_config_dir(config)
-	raw_dir = _resolve_raw_dir(hdr_config, config_dir)
-	if raw_dir is None:
-		raise FileNotFoundError("raw_to_jpg skipped: steps.hdr.raw_dir is not configured")
-	if not raw_dir.exists():
-		raise FileNotFoundError(f"raw_to_jpg skipped: raw_dir not found: {raw_dir}")
+    groups_payload = load_latest_groups_json(session_dir)
+    if groups_payload is None:
+        raise ValueError("no groups JSON found in session directory")
 
-	group = _find_group(groups_payload["groups"], group_id)
-	raw_index = build_raw_index(raw_dir, _get_raw_extensions(hdr_config))
-	requests, group_payload = plan_group_conversions(group, raw_index, hdr_config, session_dir)
+    raw_to_jpg_config = _get_raw_to_jpg_config(config)
+    raw_index = build_raw_index(raw_dir, _get_raw_extensions(raw_to_jpg_config))
 
-	if not requests:
-		raise FileNotFoundError(f"raw_to_jpg skipped: no RAW files found for {group_id}")
+    aggregate_path = session_dir / RAW_CONVERSIONS_FILENAME
 
-	_ensure_output_dirs(requests)
-	execute_conversion_plan(requests, hdr_config, log)
-	_verify_outputs(requests)
+    # (3) Iterate all groups
+    for group in groups_payload["groups"]:
+        requests, group_payload = plan_group_conversions(group, raw_index, raw_to_jpg_config, session_dir)
+        if not requests:
+            log.info("No RAW files for group %s — skipping", group["id"])
+            continue
 
-	aggregate_path = session_dir / RAW_CONVERSIONS_FILENAME
-	write_group_conversion_json(
-		aggregate_path=aggregate_path,
-		source_groups_payload=groups_payload,
-		raw_dir=raw_dir,
-		group_payload=group_payload,
-	)
-	log.info("RAW conversions written to %s", aggregate_path)
-	return aggregate_path
+        _ensure_output_dirs(requests)
+        execute_conversion_plan(requests, raw_to_jpg_config, log)
+        _verify_outputs(requests)
+
+        write_group_conversion_json(
+            aggregate_path=aggregate_path,
+            source_groups_payload=groups_payload,
+            raw_dir=raw_dir,
+            group_payload=group_payload,
+        )
+
+    log.info("RAW conversions written to %s", aggregate_path)
+    return aggregate_path
 
 
 def plan_group_conversions(
 	group: dict,
 	raw_index: dict[str, Path],
-	hdr_config: dict,
+	raw_to_jpg_config: dict,
 	session_dir: Path,
 ) -> tuple[list[ConversionRequest], dict]:
 	"""Build all conversion requests and JSON payload for one group.
 
 	:param dict group: Group entry from groups JSON
 	:param dict raw_index: Mapping of JPEG stem to RAW file path
-	:param dict hdr_config: ``steps.hdr`` configuration section
+	:param dict raw_to_jpg_config: ``steps.hdr.raw_to_jpg`` configuration section
 	:return: Tuple of conversion requests and group payload ready for JSON serialisation
 	:rtype: tuple[list[ConversionRequest], dict]
 	"""
-	recipe_paths = parse_recipe_paths(hdr_config)
+	recipe_paths = parse_recipe_paths(raw_to_jpg_config)
 	requests: list[ConversionRequest] = []
 	bracket_payloads: list[dict] = []
-	output_root = Path(session_dir) / "intermediates" / "raw_to_jpg" / group["id"]
+	output_dir = Path(session_dir) / "raw_to_jpg"
 
 	for bracket_index, bracket in enumerate(group.get("brackets", []), start=1):
-		bracket_dir = output_root / f"bracket_{bracket_index:03d}"
-		normalized_shots = normalize_bracket_shots(bracket)
+		shots = [dict(shot) for shot in bracket.get("shots", [])]
+		
 		bracket_requests = build_bracket_requests(
-			normalized_shots=normalized_shots,
-			bracket_dir=bracket_dir,
+			normalized_shots=shots,
+			bracket_dir=output_dir,
 			raw_index=raw_index,
 			recipe_paths=recipe_paths,
 			bracket_index=bracket_index - 1,
 		)
 		requests.extend(bracket_requests)
-		bracket_payloads.append(build_bracket_payload(normalized_shots, bracket_requests, session_dir))
+		bracket_payloads.append(build_bracket_payload(shots, bracket_requests, session_dir))
 
 	group_payload = {
 		"id": group["id"],
@@ -174,19 +183,19 @@ def build_raw_index(raw_dir: Path, raw_extensions: Iterable[str]) -> dict[str, P
 	return index
 
 
-def parse_recipe_paths(hdr_config: dict) -> dict[str, Path]:
+def parse_recipe_paths(raw_to_jpg_config: dict) -> dict[str, Path]:
 	"""Parse configured recipe paths.
 
-	:param dict hdr_config: ``steps.hdr`` configuration section
+	:param dict raw_to_jpg_config: ``steps.hdr.raw_to_jpg`` configuration section
 	:return: Mapping from normalised recipe key to absolute path
 	:rtype: dict[str, Path]
 	:raises ValueError: If the recipe mapping is missing or empty
 	"""
-	recipe_config = hdr_config.get("raw_to_jpg", {}).get("recipes", {})
+	recipe_config = raw_to_jpg_config.get("recipes", {})
 	if not recipe_config:
 		raise ValueError("steps.hdr.raw_to_jpg.recipes is required")
 
-	config_dir = _get_config_dir_from_hdr(hdr_config)
+	config_dir = _get_config_dir(raw_to_jpg_config)
 
 	parsed: dict[str, Path] = {}
 	for raw_key, recipe_path in recipe_config.items():
@@ -194,28 +203,6 @@ def parse_recipe_paths(hdr_config: dict) -> dict[str, Path]:
 		parsed[key] = _resolve_config_path(recipe_path, config_dir)
 
 	return parsed
-
-
-def normalize_bracket_shots(bracket: dict) -> list[dict]:
-	"""Ensure bracket shots expose ``step_offset`` and ``reference_shot``.
-
-	:param dict bracket: Bracket object from groups JSON
-	:return: Normalised shot dicts
-	:rtype: list[dict]
-	"""
-	shots = [dict(shot) for shot in bracket.get("shots", [])]
-	if not shots:
-		return []
-
-	reference_index = _resolve_reference_index(shots)
-	reference_ev = shots[reference_index].get("ev")
-
-	for index, shot in enumerate(shots):
-		shot["reference_shot"] = index == reference_index
-		if shot.get("step_offset") is None:
-			shot["step_offset"] = _derive_step_offset(shot.get("ev"), reference_ev)
-
-	return shots
 
 
 def build_bracket_requests(
@@ -268,21 +255,10 @@ def build_bracket_requests(
 				recipe_key="0",
 				recipe_paths=recipe_paths,
 				output_dir=bracket_dir,
-				collection="hdr",
+				collection="shots",
 				bracket_index=bracket_index,
 			)
 		)
-
-	requests.append(
-		make_request(
-			shot=reference_shot,
-			recipe_key="0",
-			recipe_paths=recipe_paths,
-			output_dir=bracket_dir,
-			collection="noghost",
-			bracket_index=bracket_index,
-		)
-	)
 
 	for offset_key in unique_offsets:
 		requests.append(
@@ -335,7 +311,7 @@ def build_single_shot_requests(
 		raise ValueError(f"missing recipes for single-shot conversion: {', '.join(missing_keys)}")
 
 	requests = [
-		make_request(shot, key, recipe_paths, bracket_dir, "hdr", bracket_index)
+		make_request(shot, key, recipe_paths, bracket_dir, "shots", bracket_index)
 		for key in required_keys
 	]
 	requests.extend(
@@ -401,21 +377,20 @@ def deduplicate_requests(requests: list[ConversionRequest]) -> list[ConversionRe
 	return unique
 
 
-def execute_conversion_plan(requests: list[ConversionRequest], hdr_config: dict, log=None) -> None:
+def execute_conversion_plan(requests: list[ConversionRequest], raw_to_jpg_config: dict, log=None) -> None:
 	"""Execute conversion requests grouped by recipe and output parameters.
 
 	:param list[ConversionRequest] requests: Conversion requests
-	:param dict hdr_config: ``steps.hdr`` configuration section
+	:param dict raw_to_jpg_config: ``steps.hdr`` configuration section
 	:param log: Optional logger or logger adapter
 	"""
 	log = log or logger
-	dpp4cli_exe = _resolve_dpp4cli_path(hdr_config)
-	quality = int(hdr_config.get("raw_to_jpg", {}).get("jpeg_quality", 100))
-	output_format = hdr_config.get("raw_to_jpg", {}).get("format", "jpg")
-	dpp4dir = hdr_config.get("raw_to_jpg", {}).get("dpp4dir", "")
-	verbose = bool(hdr_config.get("raw_to_jpg", {}).get("verbose", False))
-	timeout_sec = hdr_config.get("raw_to_jpg", {}).get("subprocess_timeout_sec")
-	timeout = int(timeout_sec) if timeout_sec else None
+	dpp4cli_exe = _resolve_dpp4cli_path(raw_to_jpg_config)
+	quality = int(raw_to_jpg_config.get("raw_to_jpg", {}).get("jpeg_quality", 100))
+	output_format = raw_to_jpg_config.get("raw_to_jpg", {}).get("format", "jpg")
+	dpp4dir = raw_to_jpg_config.get("raw_to_jpg", {}).get("dpp4dir", "")
+	verbose = bool(raw_to_jpg_config.get("raw_to_jpg", {}).get("verbose", False))
+	timeout = int(raw_to_jpg_config.get("raw_to_jpg", {}).get("timeout_sec_per_img", 180))
 
 	grouped: dict[tuple[Path, str, Path, str], list[ConversionRequest]] = defaultdict(list)
 	for request in requests:
@@ -441,6 +416,8 @@ def execute_conversion_plan(requests: list[ConversionRequest], hdr_config: dict,
 			command.append("--verbose")
 		command.extend(str(request.raw_path) for request in batch)
 
+		timeout = timeout * len(batch)
+
 		log.info("dpp4cli recipe %s for %d file(s)", recipe_key, len(batch))
 		result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=False)
 		if result.returncode != 0:
@@ -458,7 +435,7 @@ def build_bracket_payload(normalized_shots: list[dict], requests: list[Conversio
 	:return: Serialisable bracket payload
 	:rtype: dict
 	"""
-	collections = {"hdr": [], "noghost": [], "normalized": []}
+	collections = {"shots": [], "noghost": [], "normalized": []}
 	for request in requests:
 		relative_path = request.output_path.relative_to(session_dir)
 		collections[request.collection].append(
@@ -476,7 +453,6 @@ def build_bracket_payload(normalized_shots: list[dict], requests: list[Conversio
 		"source": [
 			{
 				"filename": shot["filename"],
-				"raw_filename": shot["raw_path"].name,
 				"ev": shot.get("ev"),
 				"shutter": shot.get("shutter"),
 				"step_offset": shot["step_offset"],
@@ -484,7 +460,7 @@ def build_bracket_payload(normalized_shots: list[dict], requests: list[Conversio
 			}
 			for shot in normalized_shots
 		],
-		"hdr": collections["hdr"],
+		"shots": collections["shots"],
 		"noghost": collections["noghost"],
 		"normalized": collections["normalized"],
 	}
@@ -560,46 +536,27 @@ def build_output_suffix(recipe_key: str) -> str:
 	return "" if normalize_recipe_key(recipe_key) == "0" else f"_{normalize_recipe_key(recipe_key)}"
 
 
-def _find_group(groups: list[dict], group_id: str) -> dict:
-	for group in groups:
-		if group.get("id") == group_id:
-			return group
-	raise ValueError(f"group not found in groups JSON: {group_id}")
+def _get_raw_to_jpg_config(config: dict) -> dict:
+	raw_to_jpg_config = dict(config.get("steps", {}).get("hdr", {}).get("raw_to_jpg", {}))
+	raw_to_jpg_config["__config_dir__"] = config.get("__config_dir__")
+	return raw_to_jpg_config
 
 
-def _get_hdr_config(config: dict) -> dict:
-	hdr_config = dict(config.get("steps", {}).get("hdr", {}))
-	hdr_config["__config_dir__"] = config.get("__config_dir__")
-	return hdr_config
-
-
-def _get_config_dir(config: dict) -> Path:
-	config_dir = config.get("__config_dir__")
+def _get_config_dir(raw_to_jpg_config: dict) -> Path:
+	config_dir = raw_to_jpg_config.get("__config_dir__")
 	return Path(config_dir).resolve() if config_dir else Path.cwd()
 
 
-def _get_config_dir_from_hdr(hdr_config: dict) -> Path:
-	config_dir = hdr_config.get("__config_dir__")
-	return Path(config_dir).resolve() if config_dir else Path.cwd()
-
-
-def _get_raw_extensions(hdr_config: dict) -> tuple[str, ...]:
-	configured = hdr_config.get("raw_to_jpg", {}).get("raw_extensions")
+def _get_raw_extensions(raw_to_jpg_config: dict) -> tuple[str, ...]:
+	configured = raw_to_jpg_config.get("raw_extensions")
 	if not configured:
 		return DEFAULT_RAW_EXTENSIONS
 	return tuple(str(value).lower() for value in configured)
 
 
-def _resolve_raw_dir(hdr_config: dict, config_dir: Path) -> Path | None:
-	raw_dir = hdr_config.get("raw_dir", "")
-	if not raw_dir:
-		return None
-	return _resolve_config_path(raw_dir, config_dir)
-
-
-def _resolve_dpp4cli_path(hdr_config: dict) -> Path:
-	config_dir = _get_config_dir_from_hdr(hdr_config)
-	dpp4cli_exe = hdr_config.get("raw_to_jpg", {}).get("dpp4cli_exe", "")
+def _resolve_dpp4cli_path(raw_to_jpg_config: dict) -> Path:
+	config_dir = _get_config_dir(raw_to_jpg_config)
+	dpp4cli_exe = raw_to_jpg_config.get("dpp4cli_exe", "")
 	if not dpp4cli_exe:
 		raise ValueError("steps.hdr.raw_to_jpg.dpp4cli_exe is required")
 	path = _resolve_config_path(dpp4cli_exe, config_dir)
@@ -613,31 +570,6 @@ def _resolve_config_path(path_value: str | Path, config_dir: Path) -> Path:
 	if path.is_absolute():
 		return path.resolve()
 	return (config_dir / path).resolve()
-
-
-def _resolve_reference_index(shots: list[dict]) -> int:
-	for index, shot in enumerate(shots):
-		if shot.get("reference_shot") is True:
-			return index
-
-	offsets = [shot.get("step_offset") for shot in shots]
-	for index, offset in enumerate(offsets):
-		if offset is not None and abs(float(offset)) < 1e-9:
-			return index
-
-	evs = [shot.get("ev") for shot in shots]
-	if all(ev is not None for ev in evs):
-		ordered = sorted((float(ev), index) for index, ev in enumerate(evs))
-		return ordered[len(ordered) // 2][1]
-
-	return len(shots) // 2
-
-
-def _derive_step_offset(shot_ev: float | None, reference_ev: float | None) -> float:
-	if shot_ev is None or reference_ev is None:
-		return 0.0
-	offset = float(reference_ev) - float(shot_ev)
-	return round(offset, 2)
 
 
 def _attach_raw_path(shot: dict, raw_index: dict[str, Path]) -> dict:

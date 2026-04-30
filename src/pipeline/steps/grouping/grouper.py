@@ -461,8 +461,14 @@ def export_groups(
     from pipeline.steps.grouping.groups_html import generate_review_html
 
     input_dir = Path(state.session["input_dir"])
-    session_dir = Path(state.session["session_dir"])
-    session_id = state.session["session_id"]
+    session_dir = Path(
+        getattr(state, "session_dir", state.session.get("session_dir", state.workspace))
+    )
+    session_id = getattr(
+        state,
+        "session_id",
+        state.session.get("session_id", state.session.get("session", "unknown_session")),
+    )
 
     groups_data  = panorama_groups_to_json(pano_groups, input_dir)
     json_path    = save_groups_json(groups_data, session_dir, session_id, str(input_dir))

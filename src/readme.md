@@ -55,30 +55,32 @@ A json file with the new file structure is created and saved in the session fold
     {
       "id": "group_003",
       "type": "hdr",
-      "ref_image": "0H8A4495.JPG",
       "brackets": [
         {
-          "hdr": [
+          "shots": [
             {
               "filename": "0H8A4495.JPG",
               "ev": 13.88,
-              "shutter": 0.008
+              "shutter": 0.008,
+              "step_offset": 0,
+              "reference_shot": true
             },
             {
               "filename": "0H8A4496.JPG",
               "ev": 15.88,
-              "shutter": 0.002
+              "shutter": 0.002,
+              "step_offset": -2,
+              "reference_shot": false
             },
             {
               "filename": "0H8A4497.JPG",
               "ev": 11.92,
-              "shutter": 0.0125
+              "shutter": 0.0125,
+              "step_offset": 2,
+              "reference_shot": false
             }
           ],
           "noghost": [
-            {
-              "filename": "0H8A4495.JPG",
-            },
             {
               "filename": "0H8A4495_+2.JPG",
             },
