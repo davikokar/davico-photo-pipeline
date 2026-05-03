@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 class GhostDetector:
     """Detects ghosting artifacts in aligned images through multi-stage morphological
     analysis and connected component filtering.
-    
+
     This class uses a combination of thresholding, morphological operations, and
     area-based filtering to identify regions with significant ghosting while
     ignoring sensor noise and micro-misalignments.
@@ -27,7 +27,7 @@ class GhostDetector:
         kernel_size: tuple = (5, 5),
     ):
         """Initialize the GhostDetector with processing parameters.
-        
+
         :param int threshold: Threshold value for binary segmentation (0-255).
             Higher values are more selective. Default: 20
         :param int min_area: Minimum area of connected components to keep (pixels).
@@ -49,7 +49,7 @@ class GhostDetector:
         self, ref_image_path: str, aligned_image_path: str
     ) -> np.ndarray:
         """Detect ghosting artifacts by comparing reference and aligned images.
-        
+
         Performs the following steps:
         1. Load and compute absolute difference in grayscale
         2. Binary thresholding to isolate moving regions
@@ -57,7 +57,7 @@ class GhostDetector:
         4. Connected component analysis with area filtering
         5. Dilation to solidify ghost regions
         6. Gaussian blur for smooth mask transitions
-        
+
         :param str ref_image_path: Path to reference (middle exposure) image
         :param str aligned_image_path: Path to aligned image
         :return: Ghost mask with values in [0.0, 1.0] range
@@ -89,9 +89,7 @@ class GhostDetector:
 
         # 4. Connected components analysis with area filtering
         # Keep only components larger than min_area threshold
-        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
-            mask_cleaned
-        )
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask_cleaned)
 
         seeds = np.zeros_like(mask_cleaned)
         for i in range(1, num_labels):
@@ -113,22 +111,21 @@ class GhostDetector:
             # Ensure blur_size is odd for symmetric Gaussian
             if blur_size % 2 == 0:
                 blur_size += 1
-            final_ghost_mask = cv2.GaussianBlur(
-                seeds, (blur_size, blur_size), 0
-            )
+            final_ghost_mask = cv2.GaussianBlur(seeds, (blur_size, blur_size), 0)
         else:
             final_ghost_mask = seeds
 
         # Convert to float [0.0, 1.0] range for downstream HDR merging
         return final_ghost_mask.astype(np.float32) / 255.0
 
-
-    def visualize_ghosts(self, ref_image_path: str, ghost_mask: np.ndarray) -> np.ndarray:
+    def visualize_ghosts(
+        self, ref_image_path: str, ghost_mask: np.ndarray
+    ) -> np.ndarray:
         """Create visualization of detected ghost regions overlaid on reference image.
-        
+
         Overlays detected ghosts in red with 30% opacity over the reference image
         for visual verification.
-        
+
         :param str ref_image_path: Path to reference image
         :param np.ndarray ghost_mask: Ghost mask with values in [0.0, 1.0]
         :return: Composite image with ghost overlay
@@ -154,7 +151,9 @@ class GhostDetector:
 
 if __name__ == "__main__":
     if len(sys.argv) != 6:
-        print("Usage: python ghost_detector.py ref_image.jpg aligned_image.jpg threshold min_area output_folder")
+        print(
+            "Usage: python ghost_detector.py ref_image.jpg aligned_image.jpg threshold min_area output_folder"
+        )
         print("  The ref image is the middle exposure one.")
         print("  The aligned image is the result of the alignment process.")
         print("  The threshold is the value used to detect significant differences.")
@@ -167,7 +166,7 @@ if __name__ == "__main__":
     threshold = float(sys.argv[3])
     min_area = int(sys.argv[4])
     output_folder = sys.argv[5]
-    
+
     logger.info("Ghost detector started.")
 
     detector = GhostDetector(threshold=threshold, min_area=min_area)

@@ -10,7 +10,6 @@ which is often missing or unreliable.
 import math
 import subprocess
 import json
-import yaml
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -24,22 +23,23 @@ logger = get_logger(__name__)
 # Data model
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ExifData:
-    path:          Path
-    timestamp:     datetime | None   = None   # DateTimeOriginal
-    timestamp_sub: float             = 0.0    # sub-second offset (0.0 - 0.999)
-    focal_length:  float | None      = None   # mm
-    aperture:      float | None      = None   # f-number
-    shutter:       float | None      = None   # seconds
-    iso:           int   | None      = None
-    ev_bias:       float | None      = None   # ExposureBiasValue from EXIF (optional)
-    ev_computed:   float | None      = None   # computed from aperture/shutter/ISO
-    width:         int   | None      = None
-    height:        int   | None      = None
-    camera_make:   str               = ""
-    camera_model:  str               = ""
-    raw:           dict              = field(default_factory=dict)  # full exiftool output
+    path: Path
+    timestamp: datetime | None = None  # DateTimeOriginal
+    timestamp_sub: float = 0.0  # sub-second offset (0.0 - 0.999)
+    focal_length: float | None = None  # mm
+    aperture: float | None = None  # f-number
+    shutter: float | None = None  # seconds
+    iso: int | None = None
+    ev_bias: float | None = None  # ExposureBiasValue from EXIF (optional)
+    ev_computed: float | None = None  # computed from aperture/shutter/ISO
+    width: int | None = None
+    height: int | None = None
+    camera_make: str = ""
+    camera_model: str = ""
+    raw: dict = field(default_factory=dict)  # full exiftool output
 
     @property
     def timestamp_float(self) -> float:
@@ -71,6 +71,7 @@ class ExifData:
 # EV computation
 # ---------------------------------------------------------------------------
 
+
 def compute_ev(aperture: float, shutter: float, iso: int) -> float:
     """
     Compute Exposure Value (EV at ISO 100) from camera settings.
@@ -87,7 +88,7 @@ def compute_ev(aperture: float, shutter: float, iso: int) -> float:
     """
     if shutter <= 0 or aperture <= 0 or iso <= 0:
         return 0.0
-    ev100 = math.log2(aperture ** 2 / shutter) - math.log2(iso / 100)
+    ev100 = math.log2(aperture**2 / shutter) - math.log2(iso / 100)
     return round(ev100, 2)
 
 
@@ -95,14 +96,15 @@ def compute_ev(aperture: float, shutter: float, iso: int) -> float:
 # EXIF reader — uses exiftool via subprocess
 # ---------------------------------------------------------------------------
 
+
 def _get_exiftool_path(config: dict | None = None) -> str:
     """
     Get the exiftool executable path from config or fallback to PATH.
-    
+
     Args:
         config: Pipeline configuration dict. If provided, looks for
                 config['grouper']['exitool_exe'] (note the typo in config key).
-    
+
     Returns:
         Path string to exiftool executable, or "exiftool" to use PATH.
     """
@@ -135,18 +137,26 @@ def read_exif(path: Path, config: dict | None = None) -> ExifData | None:
     try:
         exiftool_exe = _get_exiftool_path(config)
         result = subprocess.run(
-            [exiftool_exe, "-json", "-n",          # -n: numeric output (no units)
-             "-DateTimeOriginal",
-             "-SubSecTimeOriginal",
-             "-FocalLength",
-             "-FNumber",
-             "-ExposureTime",
-             "-ISO",
-             "-ExposureBiasValue",
-             "-ImageWidth", "-ImageHeight",
-             "-Make", "-Model",
-             str(path)],
-            capture_output=True, text=True, timeout=10
+            [
+                exiftool_exe,
+                "-json",
+                "-n",  # -n: numeric output (no units)
+                "-DateTimeOriginal",
+                "-SubSecTimeOriginal",
+                "-FocalLength",
+                "-FNumber",
+                "-ExposureTime",
+                "-ISO",
+                "-ExposureBiasValue",
+                "-ImageWidth",
+                "-ImageHeight",
+                "-Make",
+                "-Model",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         if result.returncode != 0:
             logger.warning(f"exiftool error for {path.name}: {result.stderr.strip()}")
@@ -156,7 +166,9 @@ def read_exif(path: Path, config: dict | None = None) -> ExifData | None:
 
     except FileNotFoundError:
         # exiftool not installed — use Pillow as fallback
-        logger.warning("exiftool not found, falling back to Pillow (limited EXIF support)")
+        logger.warning(
+            "exiftool not found, falling back to Pillow (limited EXIF support)"
+        )
         return _read_exif_pillow(path)
     except Exception as e:
         logger.warning(f"Failed to read EXIF from {path.name}: {e}")
@@ -180,10 +192,10 @@ def read_exif(path: Path, config: dict | None = None) -> ExifData | None:
             pass
 
     # --- Numeric fields ---
-    focal   = _to_float(data.get("FocalLength"))
-    fnum    = _to_float(data.get("FNumber"))
+    focal = _to_float(data.get("FocalLength"))
+    fnum = _to_float(data.get("FNumber"))
     shutter = _to_float(data.get("ExposureTime"))
-    iso     = _to_int(data.get("ISO"))
+    iso = _to_int(data.get("ISO"))
     ev_bias = _to_float(data.get("ExposureBiasValue"))
 
     # --- Compute EV from first principles ---
@@ -192,20 +204,20 @@ def read_exif(path: Path, config: dict | None = None) -> ExifData | None:
         ev_computed = compute_ev(fnum, shutter, iso)
 
     return ExifData(
-        path          = path,
-        timestamp     = timestamp,
-        timestamp_sub = sub_sec,
-        focal_length  = focal,
-        aperture      = fnum,
-        shutter       = shutter,
-        iso           = iso,
-        ev_bias       = ev_bias,
-        ev_computed   = ev_computed,
-        width         = _to_int(data.get("ImageWidth")),
-        height        = _to_int(data.get("ImageHeight")),
-        camera_make   = data.get("Make", ""),
-        camera_model  = data.get("Model", ""),
-        raw           = data,
+        path=path,
+        timestamp=timestamp,
+        timestamp_sub=sub_sec,
+        focal_length=focal,
+        aperture=fnum,
+        shutter=shutter,
+        iso=iso,
+        ev_bias=ev_bias,
+        ev_computed=ev_computed,
+        width=_to_int(data.get("ImageWidth")),
+        height=_to_int(data.get("ImageHeight")),
+        camera_make=data.get("Make", ""),
+        camera_model=data.get("Model", ""),
+        raw=data,
     )
 
 
@@ -215,9 +227,9 @@ def _read_exif_pillow(path: Path) -> ExifData:
         from PIL import Image
         from PIL.ExifTags import TAGS
 
-        img  = Image.open(path)
+        img = Image.open(path)
         info = img._getexif() or {}
-        tag  = {TAGS.get(k, k): v for k, v in info.items()}
+        tag = {TAGS.get(k, k): v for k, v in info.items()}
 
         ts = None
         ts_str = tag.get("DateTimeOriginal")
@@ -227,9 +239,9 @@ def _read_exif_pillow(path: Path) -> ExifData:
             except ValueError:
                 pass
 
-        fnum    = _ratio_to_float(tag.get("FNumber"))
+        fnum = _ratio_to_float(tag.get("FNumber"))
         shutter = _ratio_to_float(tag.get("ExposureTime"))
-        iso     = tag.get("ISOSpeedRatings")
+        iso = tag.get("ISOSpeedRatings")
         if isinstance(iso, tuple):
             iso = iso[0]
 
@@ -238,17 +250,17 @@ def _read_exif_pillow(path: Path) -> ExifData:
             ev_computed = compute_ev(fnum, float(shutter), int(iso))
 
         return ExifData(
-            path         = path,
-            timestamp    = ts,
-            focal_length = _ratio_to_float(tag.get("FocalLength")),
-            aperture     = fnum,
-            shutter      = shutter,
-            iso          = int(iso) if iso else None,
-            ev_computed  = ev_computed,
-            width        = tag.get("ExifImageWidth") or img.width,
-            height       = tag.get("ExifImageHeight") or img.height,
-            camera_make  = tag.get("Make", ""),
-            camera_model = tag.get("Model", ""),
+            path=path,
+            timestamp=ts,
+            focal_length=_ratio_to_float(tag.get("FocalLength")),
+            aperture=fnum,
+            shutter=shutter,
+            iso=int(iso) if iso else None,
+            ev_computed=ev_computed,
+            width=tag.get("ExifImageWidth") or img.width,
+            height=tag.get("ExifImageHeight") or img.height,
+            camera_make=tag.get("Make", ""),
+            camera_model=tag.get("Model", ""),
         )
     except Exception as e:
         logger.warning(f"Pillow EXIF fallback failed for {path.name}: {e}")
@@ -258,6 +270,7 @@ def _read_exif_pillow(path: Path) -> ExifData:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _to_float(v) -> float | None:
     if v is None:
@@ -288,22 +301,21 @@ def _ratio_to_float(v) -> float | None:
     return _to_float(v)
 
 
-def read_folder(folder: Path, extensions: tuple = (".jpg", ".jpeg"), config: dict | None = None) -> list[ExifData]:
+def read_folder(
+    folder: Path, extensions: tuple = (".jpg", ".jpeg"), config: dict | None = None
+) -> list[ExifData]:
     """
     Read EXIF for all matching files in a folder, sorted by timestamp.
 
     Files with no timestamp are sorted to the end by filename.
-    
+
     Args:
         folder: Directory containing JPEG files.
         extensions: Tuple of file extensions to match (default: .jpg, .jpeg).
         config: Optional pipeline configuration dict with exiftool path.
     """
     folder = Path(folder)
-    files  = sorted(
-        f for f in folder.iterdir()
-        if f.suffix.lower() in extensions
-    )
+    files = sorted(f for f in folder.iterdir() if f.suffix.lower() in extensions)
 
     logger.info(f"Reading EXIF from {len(files)} files in {folder}")
     results = []
@@ -313,10 +325,12 @@ def read_folder(folder: Path, extensions: tuple = (".jpg", ".jpeg"), config: dic
             results.append(exif)
 
     # Sort: files with timestamp first (by timestamp), then by filename
-    results.sort(key=lambda e: (
-        e.timestamp is None,
-        e.timestamp_float if e.timestamp else 0,
-        e.path.name,
-    ))
+    results.sort(
+        key=lambda e: (
+            e.timestamp is None,
+            e.timestamp_float if e.timestamp else 0,
+            e.path.name,
+        )
+    )
 
     return results

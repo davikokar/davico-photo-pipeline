@@ -11,14 +11,14 @@ from datetime import datetime
 
 # ANSI color codes for console output
 COLORS = {
-    "DEBUG":    "\033[36m",   # cyan
-    "INFO":     "\033[32m",   # green
-    "WARNING":  "\033[33m",   # yellow
-    "ERROR":    "\033[31m",   # red
-    "CRITICAL": "\033[35m",   # magenta
-    "RESET":    "\033[0m",
-    "BOLD":     "\033[1m",
-    "DIM":      "\033[2m",
+    "DEBUG": "\033[36m",  # cyan
+    "INFO": "\033[32m",  # green
+    "WARNING": "\033[33m",  # yellow
+    "ERROR": "\033[31m",  # red
+    "CRITICAL": "\033[35m",  # magenta
+    "RESET": "\033[0m",
+    "BOLD": "\033[1m",
+    "DIM": "\033[2m",
 }
 
 
@@ -30,8 +30,8 @@ class ColoredFormatter(logging.Formatter):
     def format(self, record):
         color = COLORS.get(record.levelname, "")
         reset = COLORS["RESET"]
-        bold  = COLORS["BOLD"]
-        dim   = COLORS["DIM"]
+        bold = COLORS["BOLD"]
+        dim = COLORS["DIM"]
 
         # Step/group context injected via 'extra'
         context = ""
@@ -45,9 +45,7 @@ class ColoredFormatter(logging.Formatter):
         asctime = datetime.fromtimestamp(record.created).strftime("%H:%M:%S")
 
         return (
-            f"{color}{bold}[{record.levelname:<8}]{reset} "
-            f"{dim}{asctime}{reset}  "
-            f"{msg}"
+            f"{color}{bold}[{record.levelname:<8}]{reset} {dim}{asctime}{reset}  {msg}"
         )
 
 
@@ -65,7 +63,9 @@ class PlainFormatter(logging.Formatter):
         return f"[{record.levelname:<8}] {asctime}  {record.getMessage()}{context}"
 
 
-def get_logger(name: str, log_file: Path | None = None, level: int = logging.DEBUG) -> logging.Logger:
+def get_logger(
+    name: str, log_file: Path | None = None, level: int = logging.DEBUG
+) -> logging.Logger:
     """
     Build and return a logger with console + optional file handler.
 

@@ -5,6 +5,8 @@ This tool automates the processing of photography post processing. The post proc
 is organized in subsequent steps. Some steps will require user approval. This is the list 
 of steps:
 
+TODO: write a schematic activity diagram of the pipeline, showing the steps and the possible paths between them.
+
 ## Grouping
 
 In the first step a folder containing jpg images is processed in order to group the images 
@@ -21,6 +23,16 @@ The output of the grouping step is a json file with the grouping structure of th
 This step requires user approval.
 The tool generates a web browser page to help the user review and adjust the grouping.
 Once the grouping is confirmed the user can save it and place it in the session folder.
+
+TODO: we need to add a an attribute to each group, specifying if the group is an aerial image or a terrestrial image.
+This is important because for aerial images we don't have raw files, and we don't have the possibility to generate 
+exposure-normalized images, so we need to skip some steps of the pipeline for aerial hdr groups. We can try to automatically
+determine if a group is aerial or terrestrial based on the metadata of the images (make "canon" -> "terrestrial", make "dji" -> "aerial"), 
+but we need to provide the user with the possibility to adjust it in case of wrong automatic classification.
+
+TODO: we need to improve the panoramic grouping, right now it works well for aerial images, but for terrestrial images 
+it is not very accurate. We can try to use the focal length and the gps coordinates to improve the grouping, 
+but we need to provide the user with the possibility to adjust it in case of wrong automatic classification.
 
 
 ## Raw Conversion to jgp
@@ -101,19 +113,43 @@ A json file with the new file structure is created and saved in the session fold
     }
 ...
 
+## Image alignment and ghost detection
+
+This step is applied only to canon (terrestrial images) hdr groups that have raw images available. 
+For aerial hdr groups, and for hdr groups without raw images, this step is skipped. We skip this 
+step for aerial hdr groups because they usually taken from such distance to minimize the presence of ghosts,
+ and also because we don't have a way to obtain jpg images from raw aerial images. The alignment of aerial images
+ can be delegated to the hdr processing step. We skip it for hdr groups without raw images
+because in this case we would need a different approach to ghost detection, since the exposure-normalized 
+images are not available. In this case we could try to use the original bracketed images, but the alignment
+and ghost detection would be less accurate.
+
+TODO: we need to create a ghost mask based on comparison between the original image and the low exposure image, and 
+a second ghost mask based on the comparison between the original image and the high exposure image. The final ghost 
+mask is the union of the two masks. This way we can detect ghosts that are visible only in the low exposure image, 
+and ghosts that are visible only in the high exposure image.
+
 ## Hdr Merge
 
 This step is applied only to hdr groups. If there are not hdr groups this step is skipped.
 
-Here there are two different scenarios, depending if there were raw images available or not. 
-The simple case is there were not raw images and the only available images are the bracketed shots.
+Here there are two different scenarios, depending if the hdr group went through the alignment and ghost detection step or not. 
 
-The images converted with Recipe 0, they are the "normal" images and will be used to generate the 
-hdr image with the best dynamic range, but with the worst ghosting. The images converted from the 
-Exposure 0 (IMG_01.CR2 in the example here above) using all relevant Recipes, will be used to 
-generate an hdr merge with the worst dynamic range (because it is obtained from a single raw), 
-but the best ghosting (no ghosts, since one image is used).
+Case 1) The hdr group went through the alignment and ghost detection step. In this case we have two sets of images to work with: the "normal" images,
+ that are the ones converted with Recipe 0, and the "noghost" images, that are the ones converted with the other recipes.
+ The "normal" images are used to generate an hdr image with the best dynamic range, but with the worst ghosting.
+ The "noghost" images are used to generate an hdr merge with the worst dynamic range (because it is obtained from a single raw), 
+ but the best ghosting (no ghosts, since one image is used). In this case we generate two different hdr merges, one with the "normal" 
+ images and one with the "noghost" images, and we use the ghost detection map to merge the two, so that the final hdr image has the best dynamic range and minimal ghosting.
 
+Case 2) We only have one set of bracketed shots without the ghost detection map. In this case we can only generate one hdr merge,
+using the "normal" images, and we will have to live with the ghosting that is present in the original bracketed shots.
+
+In both cases the hdr merge is generated with Photomatix, using the command line interface. The tool generates the command line for each hdr group.
+The default behaviour is to generate 3 different hdr merges for each hdr group, using 3 different Photomatix recipes: the Realistic recipe, the Photographic recipe, and the Adjusted recipe.
+
+Ideally we propose some merges of the 3 different recipe resuls. For example a merge based on 60 percent of photographic and 40 percent of adjusted (done with layers tranparency).
+Another interesting functionality could be to detect the sky in the images and to apply a different percentage of merges to sky and non-sky areas.
 
 
 # Command examples:

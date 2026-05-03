@@ -8,7 +8,7 @@ manages review points, and handles errors.
 from pathlib import Path
 from typing import Callable
 
-from pipeline.state import SessionState, StepStatus, GroupType, PIPELINE_STEPS
+from pipeline.state import SessionState, StepStatus, PIPELINE_STEPS
 from pipeline.utils.logger import get_logger, step_logger
 
 logger = get_logger(__name__)
@@ -17,6 +17,7 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 # Review point helpers
 # ---------------------------------------------------------------------------
+
 
 def _ask(prompt: str, choices: list[str] = ["y", "n"]) -> str:
     """Simple CLI prompt. Returns lowercased user input."""
@@ -68,9 +69,14 @@ def _review_hdr(state: SessionState) -> bool:
 
 def _review_final(state: SessionState, output_dir: Path) -> bool:
     """Final review before closing session."""
-    done = [g for g in state.all_groups()
-            if all(s["status"] in (StepStatus.DONE, StepStatus.SKIPPED)
-                   for s in g["steps"].values())]
+    done = [
+        g
+        for g in state.all_groups()
+        if all(
+            s["status"] in (StepStatus.DONE, StepStatus.SKIPPED)
+            for s in g["steps"].values()
+        )
+    ]
     print("\n" + "─" * 60)
     print("REVIEW POINT — Pipeline complete")
     print("─" * 60)
@@ -85,6 +91,7 @@ def _review_final(state: SessionState, output_dir: Path) -> bool:
 # Orchestrator
 # ---------------------------------------------------------------------------
 
+
 class Orchestrator:
     """
     Runs the full pipeline for a session.
@@ -95,8 +102,8 @@ class Orchestrator:
     """
 
     def __init__(self, state: SessionState, config: dict, output_dir: Path):
-        self.state      = state
-        self.config     = config
+        self.state = state
+        self.config = config
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -155,7 +162,9 @@ class Orchestrator:
             return
 
         # Reset the step status so it runs again
-        self.state._set_step(group_id, step, status=StepStatus.PENDING, output=None, error=None)
+        self.state._set_step(
+            group_id, step, status=StepStatus.PENDING, output=None, error=None
+        )
         self.logger.info(f"Re-running step {step} for {group_id}")
         self._dispatch_step(group, step)
 
@@ -219,25 +228,9 @@ class Orchestrator:
         (groups_002.json), drop it in the session directory, then continue.
         The HDR step will automatically use the highest-numbered JSON.
         """
-        from pipeline.steps.grouping.grouper import run_grouper, export_groups
-        from pipeline.steps.grouping.groups_io import (
-            load_latest_groups_json, json_to_state_groups, _next_version_number
-        )
+        from pipeline.steps.grouping import adapter as grouping_adapter
 
-        input_dir = Path(self.state.session["input_dir"])
-        pano_groups = run_grouper(self.state, self.config)
-
-        json_path, html_path = export_groups(
-            pano_groups  = pano_groups,
-            state    = self.state,
-        )
-        self.logger.info(
-            f"Grouping complete.\n"
-            f"  → JSON:  {json_path}\n"
-            f"  → HTML:  {html_path}\n"
-            f"  Open the HTML file to review/edit groups, export a new JSON,\n"
-            f"  drop it in {self.state.session_dir}, then continue."
-        )
+        grouping_adapter.run(self.state, self.config, self.logger)
 
     def _reload_groups_from_json(self):
         """
@@ -247,9 +240,9 @@ class Orchestrator:
         HTML review tool are picked up automatically.
         """
         from pipeline.steps.grouping.groups_io import (
-            load_latest_groups_json, json_to_state_groups
+            load_latest_groups_json,
+            json_to_state_groups,
         )
-        from pipeline.state import GroupType
 
         data = load_latest_groups_json(self.state.session_dir)
         if data is None:
@@ -259,7 +252,7 @@ class Orchestrator:
         state_groups = json_to_state_groups(data["groups"])
         self.logger.info(
             f"Loaded {len(state_groups)} group(s) from "
-            f"{data.get('generated_at','?')[:19]}"
+            f"{data.get('generated_at', '?')[:19]}"
         )
 
         # Re-register groups (overwrite whatever was in state from auto-detection)
@@ -278,7 +271,9 @@ class Orchestrator:
 
     def _run_raw_to_jpg(self, group: dict, log) -> str | None:
         """Convert RAW files to JPEG derivatives required by the HDR step."""
-        from pipeline.steps.hdr.raw_to_jpg_converter import convert_group_from_groups_json
+        from pipeline.steps.hdr.raw_to_jpg.converter import (
+            convert_group_from_groups_json,
+        )
 
         try:
             return str(

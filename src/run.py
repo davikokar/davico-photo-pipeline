@@ -36,6 +36,7 @@ def load_config(path: Path) -> dict:
 # Commands
 # ---------------------------------------------------------------------------
 
+
 def cmd_process(args):
     input_dir = Path(args.input_dir).resolve()
     if not input_dir.exists():
@@ -48,9 +49,11 @@ def cmd_process(args):
 
     config = load_config(Path(args.config))
     workspace = Path(config.get("pipeline", {}).get("workspace", "./workspace"))
-    output    = Path(config.get("pipeline", {}).get("output",    "./output"))
+    output = Path(config.get("pipeline", {}).get("output", "./output"))
 
-    state = SessionState(workspace=workspace, input_dir=str(input_dir), raw_dir=str(raw_dir))
+    state = SessionState(
+        workspace=workspace, input_dir=str(input_dir), raw_dir=str(raw_dir)
+    )
     orchestrator = Orchestrator(state=state, config=config, output_dir=output)
 
     logger.info(f"Processing: {input_dir}")
@@ -63,10 +66,10 @@ def cmd_resume(args):
         logger.error(f"Session directory not found: {session_dir}")
         sys.exit(1)
 
-    config    = load_config(Path(args.config))
+    config = load_config(Path(args.config))
     workspace = session_dir.parent
     session_id = session_dir.name
-    output    = Path(config.get("pipeline", {}).get("output", "./output"))
+    output = Path(config.get("pipeline", {}).get("output", "./output"))
 
     state = SessionState(workspace=workspace, session_id=session_id)
     orchestrator = Orchestrator(state=state, config=config, output_dir=output)
@@ -77,10 +80,10 @@ def cmd_resume(args):
 
 def cmd_rerun(args):
     session_dir = Path(args.session_dir).resolve()
-    config      = load_config(Path(args.config))
-    workspace   = session_dir.parent
-    session_id  = session_dir.name
-    output      = Path(config.get("pipeline", {}).get("output", "./output"))
+    config = load_config(Path(args.config))
+    workspace = session_dir.parent
+    session_id = session_dir.name
+    output = Path(config.get("pipeline", {}).get("output", "./output"))
 
     state = SessionState(workspace=workspace, session_id=session_id)
     orchestrator = Orchestrator(state=state, config=config, output_dir=output)
@@ -91,8 +94,8 @@ def cmd_rerun(args):
 
 def cmd_status(args):
     session_dir = Path(args.session_dir).resolve()
-    workspace   = session_dir.parent
-    session_id  = session_dir.name
+    workspace = session_dir.parent
+    session_id = session_dir.name
 
     state = SessionState(workspace=workspace, session_id=session_id)
     print(state.summary())
@@ -102,13 +105,15 @@ def cmd_status(args):
 # Argument parser
 # ---------------------------------------------------------------------------
 
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="photo-pipeline",
         description="Automated photo post-processing pipeline",
     )
     parser.add_argument(
-        "--config", default=str(DEFAULT_CONFIG),
+        "--config",
+        default=str(DEFAULT_CONFIG),
         help="Path to pipeline.yaml config file",
     )
 
@@ -127,7 +132,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_rerun = sub.add_parser("rerun", help="Re-run a single step for a group")
     p_rerun.add_argument("session_dir", help="Path to session workspace folder")
     p_rerun.add_argument("--group", required=True, help="Group ID (e.g. group_001)")
-    p_rerun.add_argument("--step",  required=True, help="Step name (e.g. color)")
+    p_rerun.add_argument("--step", required=True, help="Step name (e.g. color)")
 
     # status
     p_status = sub.add_parser("status", help="Show session status")
@@ -146,8 +151,8 @@ if __name__ == "__main__":
 
     commands = {
         "process": cmd_process,
-        "resume":  cmd_resume,
-        "rerun":   cmd_rerun,
-        "status":  cmd_status,
+        "resume": cmd_resume,
+        "rerun": cmd_rerun,
+        "status": cmd_status,
     }
     commands[args.command](args)

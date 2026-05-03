@@ -33,80 +33,81 @@ grouper:
 
 steps:
   hdr:
-    # ── Required ──────────────────────────────────────────────────────────
-    photomatix_exe: "C:\\Program Files\\Photomatix\\PhotomatixCL.exe"
-
-    # ── Strategy B (RAW-derived brackets) ─────────────────────────────────
-    # Set to the folder containing your RAW files (same stem as JPEGs).
-    # Leave empty to disable RAW conversion for this session.
-    raw_dir: ""
-    dcraw_path: ""        # leave empty if dcraw_emu is on PATH
-
     raw_to_jpg:
-      dpp4cli_exe: "C:\\tools\\dpp4cli\\dpp4cli.exe"
-      dpp4dir: ""
+      dpp4cli_exe: "C:\\temp\\tools\\dpp4cli-1.2.0\\dpp4cli.exe"
+      dpp4dir: "" # optional to DPP4 executable directory, if empty "C:\Program Files\Canon\Digital Photo Professional 4" will be used on Windows
       jpeg_quality: 100
-      format: jpg
-      verbose: false
-      raw_extensions:
-        - .cr2
-        - .cr3
-        - .crw
-        - .crf
+      format: "jpg"
+      timeout_sec_per_img: 180
+      verbose: True
+      raw_extensions: [".cr2", ".cr3"]
       recipes:
-        "0": "./config/hdr/dpp4_recipe_exp_0.dr4"
-        "-2": "./config/hdr/dpp4_recipe_exp_-2.dr4"
-        "+2": "./config/hdr/dpp4_recipe_exp_+2.dr4"
+        "0": "./hdr/dpp4_recipe_exp_0.dr4"
+        "-2": "./hdr/dpp4_recipe_exp_-2.dr4"
+        "+2": "./hdr/dpp4_recipe_exp_+2.dr4"
+    aligner:
+      diagnose: True # if true, it generates diagnostic images of the alignment process in the logs folder
+    ghost_detector:
+      threshold: 20
+      min_area: 50
+      dilation_size: 31
+      blur_size: 151
+      kernel_size: [5, 5]
+      diagnose: True   # if true, it writes the red-overlay visualisation of detected ghost areas
+    merging:
+      photomatix_exe: "C:\\Program Files\\Photomatix\\PhotomatixCL.exe"
+      # ── Styles to generate ────────────────────────────────────────────────
+      # Options: natural, realistic, photographic
+      # photographic requires xmp_settings to be set.
+      styles:
+        - natural
+        - realistic
+      xmp_settings: ""    # path to .xmp for photographic/tone-compressor style
 
-    # ── Styles to generate ────────────────────────────────────────────────
-    # Options: natural, realistic, photographic
-    # photographic requires xmp_settings to be set.
-    styles:
-      - natural
-      - realistic
-    xmp_settings: ""    # path to .xmp for photographic/tone-compressor style
+      # ── Ghost detection ───────────────────────────────────────────────────
+      # Strategy A and B are triggered only if ghost_area_min_pct is exceeded.
+      #
+      # ghost_area_min_pct     % of image area that must be flagged to declare
+      #                        "has ghosts". Raise to ignore small ghosts
+      #                        (a leaf, a distant car). Default: 1.5
+      #
+      # ghost_abs_variance_floor  minimum absolute inter-frame variance for a
+      #                        pixel to qualify. Raise to ignore high-contrast
+      #                        texture or subtle motion. Default: 50
+      #                        Suggested range to try: 30 (strict) – 150 (lenient)
+      #
+      # ghost_variance_percentile  only the top (100-X)% of valid pixels by
+      #                        variance are candidates. Raise to reduce
+      #                        the number of flagged pixels. Default: 98
+      ghost_area_min_pct:          1.5
+      ghost_abs_variance_floor:   50.0
+      ghost_variance_percentile:  98.0
 
-    # ── Ghost detection ───────────────────────────────────────────────────
-    # Strategy A and B are triggered only if ghost_area_min_pct is exceeded.
-    #
-    # ghost_area_min_pct     % of image area that must be flagged to declare
-    #                        "has ghosts". Raise to ignore small ghosts
-    #                        (a leaf, a distant car). Default: 1.5
-    #
-    # ghost_abs_variance_floor  minimum absolute inter-frame variance for a
-    #                        pixel to qualify. Raise to ignore high-contrast
-    #                        texture or subtle motion. Default: 50
-    #                        Suggested range to try: 30 (strict) – 150 (lenient)
-    #
-    # ghost_variance_percentile  only the top (100-X)% of valid pixels by
-    #                        variance are candidates. Raise to reduce
-    #                        the number of flagged pixels. Default: 98
-    ghost_area_min_pct:          1.5
-    ghost_abs_variance_floor:   50.0
-    ghost_variance_percentile:  98.0
+      # ── Common Photomatix options ─────────────────────────────────────────
+      align: true             # -a3  feature-based alignment
+      reduce_ca: true         # -ca  chromatic aberration reduction
+      noise_reduction: 1      # -no0 underexposed only, -no1 normal+under, -no2 all, -no9 merged
+      # noise_strength: 100   # -nr  50-150, leave commented for default
 
-    # ── Common Photomatix options ─────────────────────────────────────────
-    align: true             # -a3  feature-based alignment
-    reduce_ca: true         # -ca  chromatic aberration reduction
-    noise_reduction: 1      # -no0 underexposed only, -no1 normal+under, -no2 all, -no9 merged
-    # noise_strength: 100   # -nr  50-150, leave commented for default
+      # ── Fusion/Natural Adjusted params ───────────────────────────────────
+      natural:
+        accentuation:     5.0   # -2a  range -10 to +10
+        blending_point:  -6.0   # -2b  range -10 to +10
+        color_saturation: 2.0   # -2c  range -10 to +10
+        sharpness:        5.0   # -2h  range   0 to +10
+        black_point:      6.0   # -2k  range   0 to +10
+        midtone:          2.0   # -2m  range -10 to +10
+        shadows:          6.0   # -2s  range   0 to +10
+        white_point:      6.0   # -2w  range   0 to +10
 
-    # ── Fusion/Natural Adjusted params ───────────────────────────────────
-    natural:
-      accentuation:     5.0   # -2a  range -10 to +10
-      blending_point:  -6.0   # -2b  range -10 to +10
-      color_saturation: 2.0   # -2c  range -10 to +10
-      sharpness:        5.0   # -2h  range   0 to +10
-      black_point:      6.0   # -2k  range   0 to +10
-      midtone:          2.0   # -2m  range -10 to +10
-      shadows:          6.0   # -2s  range   0 to +10
-      white_point:      6.0   # -2w  range   0 to +10
+      # ── Fusion/Realistic params ───────────────────────────────────────────
+      realistic:
+        strength:         0.0   # -5a  range -10 to +10
+        color_saturation: 0.0   # -5c  range -10 to +10
+        sharpness:        2.0   # -5h  range   0 to +10
 
-    # ── Fusion/Realistic params ───────────────────────────────────────────
-    realistic:
-      strength:         0.0   # -5a  range -10 to +10
-      color_saturation: 0.0   # -5c  range -10 to +10
-      sharpness:        2.0   # -5h  range   0 to +10
+
+
 
   stitch:
     tool: hugin                # options: hugin, opencv

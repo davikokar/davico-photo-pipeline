@@ -52,6 +52,7 @@ GROUPS_FORMAT_VERSION = 1
 # Save
 # ---------------------------------------------------------------------------
 
+
 def save_groups_json(
     groups_data: list[dict],
     session_dir: Path,
@@ -78,11 +79,11 @@ def save_groups_json(
     path = session_dir / filename
 
     payload = {
-        "version":      GROUPS_FORMAT_VERSION,
-        "session_id":   session_id,
-        "input_dir":    str(input_dir),
+        "version": GROUPS_FORMAT_VERSION,
+        "session_id": session_id,
+        "input_dir": str(input_dir),
         "generated_at": datetime.now().isoformat(),
-        "groups":       groups_data,
+        "groups": groups_data,
     }
 
     with open(path, "w", encoding="utf-8") as f:
@@ -103,6 +104,7 @@ def _next_version_number(session_dir: Path) -> int:
 # ---------------------------------------------------------------------------
 # Load
 # ---------------------------------------------------------------------------
+
 
 def load_latest_groups_json(session_dir: Path) -> dict | None:
     """
@@ -151,6 +153,7 @@ def _validate(data: dict):
 # Convert between PanoramaGroup objects and JSON dicts
 # ---------------------------------------------------------------------------
 
+
 def panorama_groups_to_json(pano_groups: list, input_dir: Path) -> list[dict]:
     """
     Convert a list of PanoramaGroup objects (from grouper) to JSON-serialisable dicts.
@@ -164,27 +167,29 @@ def panorama_groups_to_json(pano_groups: list, input_dir: Path) -> list[dict]:
     """
     groups_data = []
     for i, pg in enumerate(pano_groups):
-        group_id = f"group_{i+1:03d}"
+        group_id = f"group_{i + 1:03d}"
         brackets = []
         for bracket in pg.brackets:
             shots = []
             offsets = bracket.step_offsets
             for shot, offset_info in zip(bracket.shots, offsets):
                 shot_dict = {
-                    "filename":       shot.path.name,
-                    "ev":             round(shot.ev, 2) if shot.ev is not None else None,
-                    "shutter":        shot.shutter,
-                    "step_offset":    offset_info["step_offset"],
+                    "filename": shot.path.name,
+                    "ev": round(shot.ev, 2) if shot.ev is not None else None,
+                    "shutter": shot.shutter,
+                    "step_offset": offset_info["step_offset"],
                     "reference_shot": offset_info["reference_shot"],
                 }
                 shots.append(shot_dict)
             brackets.append({"shots": shots})
 
-        groups_data.append({
-            "id":       group_id,
-            "type":     pg.group_type.value,
-            "brackets": brackets,
-        })
+        groups_data.append(
+            {
+                "id": group_id,
+                "type": pg.group_type.value,
+                "brackets": brackets,
+            }
+        )
 
     return groups_data
 
@@ -205,14 +210,14 @@ def json_to_state_groups(groups_data: list[dict]) -> list[dict]:
     state_groups = []
     for g in groups_data:
         all_files = [
-            shot["filename"]
-            for bracket in g["brackets"]
-            for shot in bracket["shots"]
+            shot["filename"] for bracket in g["brackets"] for shot in bracket["shots"]
         ]
-        state_groups.append({
-            "id":       g["id"],
-            "type":     g["type"],
-            "files":    all_files,
-            "brackets": g["brackets"],   # preserved for HDR merge
-        })
+        state_groups.append(
+            {
+                "id": g["id"],
+                "type": g["type"],
+                "files": all_files,
+                "brackets": g["brackets"],  # preserved for HDR merge
+            }
+        )
     return state_groups

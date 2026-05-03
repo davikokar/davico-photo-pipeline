@@ -19,9 +19,8 @@ Algorithm overview
 
 import statistics
 from pathlib import Path
-from typing import Optional
 
-from pipeline.state import SessionState, GroupType
+from pipeline.state import GroupType
 from pipeline.utils.exif import ExifData, read_folder
 from pipeline.utils.logger import get_logger
 
@@ -69,11 +68,13 @@ PANO_VISUAL_CHECK: bool = True
 # Internal data structures
 # ---------------------------------------------------------------------------
 
+
 class Bracket:
     """
     One HDR bracket: a set of shots taken in rapid succession.
     May also be a single shot with no EV variation.
     """
+
     def __init__(self, shots: list[ExifData]):
         self.shots = shots
 
@@ -118,7 +119,9 @@ class Bracket:
         if all(e is None for e in evs):
             return len(self.shots) // 2
         median_ev = statistics.median(e for e in evs if e is not None)
-        _, idx = min((abs((s.ev or 0.0) - median_ev), i) for i, s in enumerate(self.shots))
+        _, idx = min(
+            (abs((s.ev or 0.0) - median_ev), i) for i, s in enumerate(self.shots)
+        )
         return idx
 
     @property
@@ -140,15 +143,17 @@ class Bracket:
 
         result = []
         for i, shot in enumerate(self.shots):
-            is_ref = (i == ref_idx)
+            is_ref = i == ref_idx
             if not self.is_hdr or ref_ev is None or shot.ev is None:
                 result.append({"step_offset": 0.0, "reference_shot": is_ref})
             else:
                 raw_offset = ref_ev - shot.ev
-                result.append({
-                    "step_offset": _round_to_third(raw_offset),
-                    "reference_shot": is_ref,
-                })
+                result.append(
+                    {
+                        "step_offset": _round_to_third(raw_offset),
+                        "reference_shot": is_ref,
+                    }
+                )
         return result
 
     @property
@@ -156,9 +161,11 @@ class Bracket:
         return self.ev_spread >= EV_VARIATION_THRESHOLD
 
     def __repr__(self):
-        return (f"Bracket({len(self.shots)} shots, "
-                f"ev_spread={self.ev_spread:.1f}, "
-                f"fl={self.focal_length}mm)")
+        return (
+            f"Bracket({len(self.shots)} shots, "
+            f"ev_spread={self.ev_spread:.1f}, "
+            f"fl={self.focal_length}mm)"
+        )
 
 
 class PanoramaGroup:
@@ -193,6 +200,7 @@ class PanoramaGroup:
 # ---------------------------------------------------------------------------
 # Step 1 — form HDR brackets from raw shot list
 # ---------------------------------------------------------------------------
+
 
 def _form_brackets(shots: list[ExifData], max_hdr_gap: float) -> list[Bracket]:
     """
@@ -232,6 +240,7 @@ def _form_brackets(shots: list[ExifData], max_hdr_gap: float) -> list[Bracket]:
 # Step 2 — group brackets into panorama sequences
 # ---------------------------------------------------------------------------
 
+
 def _same_focal(a: Bracket, b: Bracket, tol: float) -> bool:
     if a.focal_length is None or b.focal_length is None:
         return True  # can't disprove — assume same
@@ -239,10 +248,10 @@ def _same_focal(a: Bracket, b: Bracket, tol: float) -> bool:
 
 
 def _form_panorama_groups(
-    brackets:      list[Bracket],
-    max_pano_gap:  float,
-    focal_tol:     float,
-    pano_cfg=None,   # PanoCheckConfig | None
+    brackets: list[Bracket],
+    max_pano_gap: float,
+    focal_tol: float,
+    pano_cfg=None,  # PanoCheckConfig | None
     log=None,
 ) -> list[PanoramaGroup]:
     """
@@ -270,19 +279,23 @@ def _form_panorama_groups(
     visual_check_enabled = PANO_VISUAL_CHECK and pano_cfg is not None
     if visual_check_enabled:
         from pipeline.steps.grouping.pano_checker import (
-            check_panoramic_overlap, PanoCheckConfig
+            check_panoramic_overlap,
         )
 
     groups: list[PanoramaGroup] = []
     current: list[Bracket] = [brackets[0]]
 
     for prev, curr in zip(brackets, brackets[1:]):
-        gap     = curr.start_time - prev.end_time
+        gap = curr.start_time - prev.end_time
         same_fl = _same_focal(prev, curr, focal_tol)
 
         # ── Pre-filter: time and focal length ──────────────────────────
         if gap > max_pano_gap or not same_fl:
-            reason = f"gap={gap:.1f}s>{max_pano_gap}s" if gap > max_pano_gap else "focal change"
+            reason = (
+                f"gap={gap:.1f}s>{max_pano_gap}s"
+                if gap > max_pano_gap
+                else "focal change"
+            )
             log.debug(f"  New group: {reason}")
             groups.append(PanoramaGroup(current))
             current = [curr]
@@ -292,7 +305,7 @@ def _form_panorama_groups(
         if visual_check_enabled:
             img_a = prev.reference_shot.path
             img_b = curr.reference_shot.path
-            vc    = check_panoramic_overlap(img_a, img_b, cfg=pano_cfg, log=log)
+            vc = check_panoramic_overlap(img_a, img_b, cfg=pano_cfg, log=log)
 
             if vc.confidence >= pano_cfg.min_confidence_to_override:
                 if not vc.is_panoramic_overlap:
@@ -329,34 +342,35 @@ def _form_panorama_groups(
 # Main grouper function
 # ---------------------------------------------------------------------------
 
+
 def run_grouper(
-    state: SessionState,
+    input_dir: Path,
     config: dict | None = None,
+    log=None,
 ) -> list[PanoramaGroup]:
-    """
-    Scan input_dir, detect groups, register them in state.
+    """Scan input_dir, detect groups, and return them.
 
-    Args:
-        state:     Session state (groups will be added here).
-        config:    Optional config dict (from pipeline.yaml 'grouper' section).
-
-    Returns:
-        List of PanoramaGroup objects (already registered in state).
+    :param Path input_dir: Folder containing source JPEG files
+    :param dict config: Optional full pipeline config (only ``grouper`` section is read)
+    :param log: Optional logger
+    :return: List of detected PanoramaGroup objects
+    :rtype: list[PanoramaGroup]
     """
-    cfg          = (config or {}).get("grouper", {})
-    max_hdr_gap  = float(cfg.get("max_hdr_gap",  MAX_HDR_GAP))
+    log = log or logger
+    input_dir = Path(input_dir)
+
+    cfg = (config or {}).get("grouper", {})
+    max_hdr_gap = float(cfg.get("max_hdr_gap", MAX_HDR_GAP))
     max_pano_gap = float(cfg.get("max_pano_gap", MAX_PANO_GAP))
-    focal_tol    = float(cfg.get("focal_length_tolerance", FOCAL_LENGTH_TOLERANCE))
-    ev_thresh    = float(cfg.get("ev_variation_threshold", EV_VARIATION_THRESHOLD))
-
-    input_dir = Path(state.session["input_dir"])
+    focal_tol = float(cfg.get("focal_length_tolerance", FOCAL_LENGTH_TOLERANCE))
 
     # Build PanoCheckConfig from the 'grouper.pano_check' sub-section.
     # If the key is absent or pano_visual_check=false, visual checking is disabled.
     pano_cfg = None
     if cfg.get("pano_visual_check", PANO_VISUAL_CHECK):
         from pipeline.steps.grouping.pano_checker import PanoCheckConfig
-        pc_dict  = cfg.get("pano_check", {})
+
+        pc_dict = cfg.get("pano_check", {})
         pano_cfg = PanoCheckConfig.from_dict(pc_dict)
         logger.info("Panorama visual check: ENABLED")
     else:
@@ -385,29 +399,20 @@ def run_grouper(
         logger.debug(f"  {b}")
 
     # 3. Group into panorama sequences
-    pano_groups = _form_panorama_groups(brackets, max_pano_gap, focal_tol, pano_cfg=pano_cfg, log=logger)
+    pano_groups = _form_panorama_groups(
+        brackets, max_pano_gap, focal_tol, pano_cfg=pano_cfg, log=logger
+    )
     logger.info(f"Formed {len(pano_groups)} group(s)")
 
-    # 4. Register in state
     for i, pg in enumerate(pano_groups):
-        group_id   = f"group_{i+1:03d}"
-        file_names = [s.path.name for s in pg.all_shots]
-        state.add_group(group_id, file_names, pg.group_type)
-
-        logger.info(
-            f"  {group_id}: {pg.group_type.value} — "
-            f"{len(pg.brackets)} bracket(s), "
-            f"{len(pg.all_shots)} shot(s)"
+        log.info(
+            f"  group_{i + 1:03d}: {pg.group_type.value} — "
+            f"{len(pg.brackets)} bracket(s), {len(pg.all_shots)} shot(s)"
         )
         if pg.is_hdr:
             for j, b in enumerate(pg.brackets):
                 evs = [f"{s.ev:+.1f}" for s in b.shots if s.ev is not None]
-                logger.debug(f"    bracket {j+1}: EV [{', '.join(evs)}]")
-
-    # 5. Mark grouping step as done for all groups
-    for pg_idx, pg in enumerate(pano_groups):
-        group_id = f"group_{pg_idx+1:03d}"
-        state.step_done(group_id, "grouping")
+                log.debug(f"    bracket {j + 1}: EV [{', '.join(evs)}]")
 
     return pano_groups
 
@@ -416,21 +421,26 @@ def run_grouper(
 # Diagnostic helpers (useful during development / review)
 # ---------------------------------------------------------------------------
 
+
 def grouping_report(pano_groups: list[PanoramaGroup]) -> str:
     """Return a human-readable summary of detected groups."""
     lines = [f"\nGrouping report — {len(pano_groups)} group(s)\n" + "─" * 50]
 
     for i, pg in enumerate(pano_groups):
-        group_id = f"group_{i+1:03d}"
+        group_id = f"group_{i + 1:03d}"
         lines.append(f"\n{group_id}  [{pg.group_type.value}]")
         lines.append(f"  Brackets : {len(pg.brackets)}")
         lines.append(f"  Total shots: {len(pg.all_shots)}")
 
         for j, b in enumerate(pg.brackets):
             evs = [f"{s.ev:+.1f}" for s in b.shots if s.ev is not None]
-            ts  = b.shots[0].timestamp.strftime("%H:%M:%S") if b.shots[0].timestamp else "??:??:??"
+            ts = (
+                b.shots[0].timestamp.strftime("%H:%M:%S")
+                if b.shots[0].timestamp
+                else "??:??:??"
+            )
             lines.append(
-                f"  [{j+1}] {ts}  {len(b.shots)} shots"
+                f"  [{j + 1}] {ts}  {len(b.shots)} shots"
                 + (f"  EV=[{', '.join(evs)}]" if evs else "")
                 + ("  ← HDR" if b.is_hdr else "")
             )
@@ -438,50 +448,3 @@ def grouping_report(pano_groups: list[PanoramaGroup]) -> str:
                 lines.append(f"       · {s.path.name}")
 
     return "\n".join(lines)
-
-# ---------------------------------------------------------------------------
-# Export helpers — called by run_grouper after detection
-# ---------------------------------------------------------------------------
-
-def export_groups(
-    pano_groups: list,
-    state: SessionState,
-) -> tuple:
-    """
-    Export detected groups to versioned JSON and generate HTML review page.
-
-    Returns:
-        (json_path, html_path)
-    """
-    from pipeline.steps.grouping.groups_io import (
-        save_groups_json,
-        panorama_groups_to_json,
-        _next_version_number,
-    )
-    from pipeline.steps.grouping.groups_html import generate_review_html
-
-    input_dir = Path(state.session["input_dir"])
-    session_dir = Path(
-        getattr(state, "session_dir", state.session.get("session_dir", state.workspace))
-    )
-    session_id = getattr(
-        state,
-        "session_id",
-        state.session.get("session_id", state.session.get("session", "unknown_session")),
-    )
-
-    groups_data  = panorama_groups_to_json(pano_groups, input_dir)
-    json_path    = save_groups_json(groups_data, session_dir, session_id, str(input_dir))
-
-    # Next version for the HTML export button (= version after the one just saved)
-    next_ver     = _next_version_number(session_dir)
-    html_path    = session_dir / "groups_review.html"
-    generate_review_html(
-        groups_data  = groups_data,
-        input_dir    = input_dir,
-        output_path  = html_path,
-        session_id   = session_id,
-        next_version = next_ver,
-    )
-
-    return json_path, html_path

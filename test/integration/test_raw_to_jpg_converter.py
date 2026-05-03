@@ -2,24 +2,23 @@
 Integration test for the raw to JPEG converter.
 """
 
-import sys
-import tempfile
-from datetime import datetime
 from pathlib import Path
-from run import load_config, DEFAULT_CONFIG
+
 import pytest
 
-from pipeline.steps.hdr.raw_to_jpg_converter import convert_all_groups_from_groups_json
-from pipeline.utils.exif import read_folder
-from pipeline.state import SessionState, GroupType
-from pipeline.steps.grouping.grouper import export_groups, run_grouper, grouping_report
+from pipeline.state import SessionState
+from pipeline.steps.hdr.raw_to_jpg import adapter as raw_to_jpg_adapter
 from pipeline.utils.logger import get_logger
+from run import DEFAULT_CONFIG, load_config
 
 logger = get_logger("integration_test")
 
+
 # @pytest.mark.parametrize("input_folder", ['C:\\Temp\\pipeline_tests\\mavic'])
-@pytest.mark.parametrize("raw_dir", ['C:\\Temp\\pipeline_tests\\canon\\raw'])
-@pytest.mark.parametrize("session_dir", ['C:\\Temp\\pipeline_tests\\output\\20260429_161243'])
+@pytest.mark.parametrize("raw_dir", ["C:\\Temp\\pipeline_tests\\canon\\raw"])
+@pytest.mark.parametrize(
+    "session_dir", ["C:\\Temp\\pipeline_tests\\output\\20260430_154800"]
+)
 def test_raw_to_jpg_conversion(raw_dir, session_dir):
     """
     Args:
@@ -27,18 +26,13 @@ def test_raw_to_jpg_conversion(raw_dir, session_dir):
         session_dir: where the grouper output (groups json file) has been written.
     """
 
-    # 1. Get config
     config = load_config(DEFAULT_CONFIG)
 
-    # 2. run conversion
-    output = convert_all_groups_from_groups_json(
-        session_dir=session_dir,
-        raw_dir=raw_dir,
-        config=config,
-        log=logger,)
+    workspace = Path(session_dir).parent
+    session_id = Path(session_dir).name
+    state = SessionState(workspace=workspace, session_id=session_id, raw_dir=raw_dir)
 
-
-
-
-
-
+    output = raw_to_jpg_adapter.run(state, config=config, log=logger)
+    assert output is not None and output.exists(), (
+        "raw_conversions.json was not written"
+    )

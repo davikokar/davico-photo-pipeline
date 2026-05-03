@@ -33,7 +33,7 @@ rather than the dark or bright exposure.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -95,14 +95,15 @@ MIN_CONFIDENCE_TO_OVERRIDE = 0.55
 # Result dataclass
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class PanoCheckResult:
-    is_panoramic_overlap: bool    = False
-    direction:            str     = "none"   # horizontal | vertical | none | ambiguous
-    overlap_pct:          float   = 0.0      # estimated overlap %
-    inliers:              int     = 0
-    confidence:           float   = 0.0      # 0-1: how sure we are of the result
-    reason:               str     = ""       # human-readable explanation
+    is_panoramic_overlap: bool = False
+    direction: str = "none"  # horizontal | vertical | none | ambiguous
+    overlap_pct: float = 0.0  # estimated overlap %
+    inliers: int = 0
+    confidence: float = 0.0  # 0-1: how sure we are of the result
+    reason: str = ""  # human-readable explanation
 
     def __str__(self):
         return (
@@ -117,19 +118,20 @@ class PanoCheckResult:
 # Config dataclass
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class PanoCheckConfig:
-    analysis_width:           int   = ANALYSIS_WIDTH
-    orb_n_features:           int   = ORB_N_FEATURES
-    lowe_ratio:               float = LOWE_RATIO
-    min_matches:              int   = MIN_MATCHES_FOR_HOMOGRAPHY
-    min_inliers:              int   = MIN_INLIERS
-    scale_min:                float = SCALE_MIN
-    scale_max:                float = SCALE_MAX
-    max_rotation_deg:         float = MAX_ROTATION_DEG
-    direction_dominance:      float = DIRECTION_DOMINANCE
-    overlap_min:              float = OVERLAP_MIN
-    overlap_max:              float = OVERLAP_MAX
+    analysis_width: int = ANALYSIS_WIDTH
+    orb_n_features: int = ORB_N_FEATURES
+    lowe_ratio: float = LOWE_RATIO
+    min_matches: int = MIN_MATCHES_FOR_HOMOGRAPHY
+    min_inliers: int = MIN_INLIERS
+    scale_min: float = SCALE_MIN
+    scale_max: float = SCALE_MAX
+    max_rotation_deg: float = MAX_ROTATION_DEG
+    direction_dominance: float = DIRECTION_DOMINANCE
+    overlap_min: float = OVERLAP_MIN
+    overlap_max: float = OVERLAP_MAX
     min_confidence_to_override: float = MIN_CONFIDENCE_TO_OVERRIDE
 
     @classmethod
@@ -141,6 +143,7 @@ class PanoCheckConfig:
 # ---------------------------------------------------------------------------
 # Image loading and resizing
 # ---------------------------------------------------------------------------
+
 
 def _load_resized(path: Path, target_width: int) -> Optional[np.ndarray]:
     """
@@ -161,6 +164,7 @@ def _load_resized(path: Path, target_width: int) -> Optional[np.ndarray]:
 # ---------------------------------------------------------------------------
 # Feature detection and matching
 # ---------------------------------------------------------------------------
+
 
 def _detect_and_match(
     gray_a: np.ndarray,
@@ -195,6 +199,7 @@ def _detect_and_match(
 # ---------------------------------------------------------------------------
 # Homography estimation and analysis
 # ---------------------------------------------------------------------------
+
 
 def _estimate_homography(
     kp_a: list,
@@ -282,7 +287,7 @@ def _analyse_homography(
         reasons.append(f"rot={rotation_deg:.1f}°✓")
 
     # ── Determine translation direction ──────────────────────────────────
-    t_mag = float(np.sqrt(tx ** 2 + ty ** 2))
+    t_mag = float(np.sqrt(tx**2 + ty**2))
 
     if t_mag < 2.0:
         # Essentially no translation → same scene, not a panorama pair
@@ -290,7 +295,7 @@ def _analyse_homography(
         direction = "none"
         overlap_pct = 100.0
     else:
-        h_fraction = abs(tx) / t_mag   # fraction of motion that is horizontal
+        h_fraction = abs(tx) / t_mag  # fraction of motion that is horizontal
         v_fraction = abs(ty) / t_mag
 
         if h_fraction >= cfg.direction_dominance:
@@ -316,11 +321,11 @@ def _analyse_homography(
     if direction not in ("none",):
         if overlap_frac < cfg.overlap_min:
             failures.append(
-                f"overlap={overlap_pct:.0f}% < {cfg.overlap_min*100:.0f}% (frames too far apart)"
+                f"overlap={overlap_pct:.0f}% < {cfg.overlap_min * 100:.0f}% (frames too far apart)"
             )
         elif overlap_frac > cfg.overlap_max:
             failures.append(
-                f"overlap={overlap_pct:.0f}% > {cfg.overlap_max*100:.0f}% (frames too similar)"
+                f"overlap={overlap_pct:.0f}% > {cfg.overlap_max * 100:.0f}% (frames too similar)"
             )
         else:
             reasons.append(f"overlap={overlap_pct:.0f}%✓")
@@ -331,7 +336,7 @@ def _analyse_homography(
     # Confidence: starts at 1.0, penalised by the severity of each failure
     confidence = 1.0
     for f in failures:
-        confidence *= 0.5   # each failure halves confidence
+        confidence *= 0.5  # each failure halves confidence
     if direction == "ambiguous":
         confidence *= 0.7
 
@@ -343,10 +348,11 @@ def _analyse_homography(
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def check_panoramic_overlap(
-    path_a:   Path,
-    path_b:   Path,
-    cfg:      PanoCheckConfig | None = None,
+    path_a: Path,
+    path_b: Path,
+    cfg: PanoCheckConfig | None = None,
     log=None,
 ) -> PanoCheckResult:
     """
@@ -392,9 +398,9 @@ def check_panoramic_overlap(
         result.confidence = 0.1
         return result
 
-    matcher   = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
-    raw       = matcher.knnMatch(des_a, des_b, k=2)
-    good      = [m for m, n in raw if m.distance < cfg.lowe_ratio * n.distance]
+    matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
+    raw = matcher.knnMatch(des_a, des_b, k=2)
+    good = [m for m, n in raw if m.distance < cfg.lowe_ratio * n.distance]
 
     log.debug(
         f"  {path_a.name}↔{path_b.name}: "
@@ -402,8 +408,8 @@ def check_panoramic_overlap(
     )
 
     if len(good) < cfg.min_matches:
-        result.reason      = f"too few good matches ({len(good)} < {cfg.min_matches})"
-        result.confidence  = 0.2
+        result.reason = f"too few good matches ({len(good)} < {cfg.min_matches})"
+        result.confidence = 0.2
         return result
 
     # ── RANSAC homography ─────────────────────────────────────────────────
@@ -412,7 +418,7 @@ def check_panoramic_overlap(
     H, mask = cv2.findHomography(pts_a, pts_b, cv2.RANSAC, ransacReprojThreshold=5.0)
 
     if H is None or mask is None:
-        result.reason     = f"RANSAC failed ({len(good)} matches)"
+        result.reason = f"RANSAC failed ({len(good)} matches)"
         result.confidence = 0.2
         return result
 
@@ -420,7 +426,7 @@ def check_panoramic_overlap(
     result.inliers = n_inliers
 
     if n_inliers < cfg.min_inliers:
-        result.reason     = f"too few inliers ({n_inliers} < {cfg.min_inliers})"
+        result.reason = f"too few inliers ({n_inliers} < {cfg.min_inliers})"
         result.confidence = 0.3
         return result
 
@@ -431,13 +437,13 @@ def check_panoramic_overlap(
 
     # Scale confidence by inlier ratio (more inliers = more trustworthy H)
     inlier_ratio = n_inliers / max(len(good), 1)
-    confidence   = confidence * (0.5 + 0.5 * inlier_ratio)
+    confidence = confidence * (0.5 + 0.5 * inlier_ratio)
 
     result.is_panoramic_overlap = is_pano
-    result.direction            = direction
-    result.overlap_pct          = round(overlap_pct, 1)
-    result.confidence           = round(confidence, 3)
-    result.reason               = reason
+    result.direction = direction
+    result.overlap_pct = round(overlap_pct, 1)
+    result.confidence = round(confidence, 3)
+    result.reason = reason
 
     log.debug(f"  → {result}")
     return result

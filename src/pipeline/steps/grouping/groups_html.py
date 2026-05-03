@@ -26,12 +26,13 @@ from pipeline.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-THUMB_HEIGHT = 110   # px
+THUMB_HEIGHT = 110  # px
 
 
 # ---------------------------------------------------------------------------
 # Thumbnail helper
 # ---------------------------------------------------------------------------
+
 
 def _b64_thumb(img_path: Path, height: int = THUMB_HEIGHT) -> str:
     """Return a base64 data-URI thumbnail, or a grey placeholder on error."""
@@ -60,6 +61,7 @@ def _placeholder_b64(height: int) -> str:
 # Main generator
 # ---------------------------------------------------------------------------
 
+
 def generate_review_html(
     groups_data: list[dict],
     input_dir: Path,
@@ -80,7 +82,7 @@ def generate_review_html(
     Returns:
         Path to the written HTML file.
     """
-    input_dir   = Path(input_dir)
+    input_dir = Path(input_dir)
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -99,8 +101,8 @@ def generate_review_html(
     logger.info(f"Generated {len(thumb_map)} thumbnails")
 
     # Embed the initial groups state and thumbnails as JSON in the HTML
-    groups_json_str  = json.dumps(groups_data, ensure_ascii=False)
-    thumb_map_str    = json.dumps(thumb_map, ensure_ascii=False)
+    groups_json_str = json.dumps(groups_data, ensure_ascii=False)
+    thumb_map_str = json.dumps(thumb_map, ensure_ascii=False)
     next_version_str = f"{next_version:03d}"
 
     html = f"""<!DOCTYPE html>

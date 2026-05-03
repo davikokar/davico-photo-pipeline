@@ -9,7 +9,6 @@ import json
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any
 
 from pipeline.utils.logger import get_logger
 
@@ -20,18 +19,19 @@ logger = get_logger(__name__)
 # Enums
 # ---------------------------------------------------------------------------
 
+
 class StepStatus(str, Enum):
-    PENDING  = "pending"
-    RUNNING  = "running"
-    DONE     = "done"
-    FAILED   = "failed"
-    SKIPPED  = "skipped"
+    PENDING = "pending"
+    RUNNING = "running"
+    DONE = "done"
+    FAILED = "failed"
+    SKIPPED = "skipped"
 
 
 class GroupType(str, Enum):
-    SINGLE      = "single"       # single shot, no HDR, no panorama
-    HDR         = "hdr"          # HDR bracketing, no panorama
-    PANORAMA    = "panorama"     # panorama, no HDR
+    SINGLE = "single"  # single shot, no HDR, no panorama
+    HDR = "hdr"  # HDR bracketing, no panorama
+    PANORAMA = "panorama"  # panorama, no HDR
     HDR_PANORAMA = "hdr+panorama"
 
 
@@ -61,29 +61,30 @@ def _empty_steps() -> dict:
 
 def new_group(group_id: str, files: list[str], group_type: GroupType) -> dict:
     return {
-        "id":       group_id,
-        "type":     group_type,
-        "files":    files,
-        "steps":    _empty_steps(),
-        "notes":    [],        # AI review notes or manual annotations
+        "id": group_id,
+        "type": group_type,
+        "files": files,
+        "steps": _empty_steps(),
+        "notes": [],  # AI review notes or manual annotations
     }
 
 
 def new_session(session_id: str, input_dir: str, raw_dir: str) -> dict:
     return {
-        "session":    session_id,
+        "session": session_id,
         "created_at": datetime.now().isoformat(),
         "updated_at": datetime.now().isoformat(),
-        "input_dir":  input_dir,
-        "raw_dir":    raw_dir,
-        "groups":     {},
-        "finished":   False,
+        "input_dir": input_dir,
+        "raw_dir": raw_dir,
+        "groups": {},
+        "finished": False,
     }
 
 
 # ---------------------------------------------------------------------------
 # State class
 # ---------------------------------------------------------------------------
+
 
 class SessionState:
     """
@@ -92,21 +93,32 @@ class SessionState:
     All mutations call save() automatically to keep the file in sync.
     """
 
-    def __init__(self, workspace: Path, session_id: str | None = None, input_dir: str = "", raw_dir: str = ""):
-        self.workspace  = Path(workspace)
+    def __init__(
+        self,
+        workspace: Path,
+        session_id: str | None = None,
+        input_dir: str = "",
+        raw_dir: str = "",
+    ):
+        self.workspace = Path(workspace)
         self.session_id = session_id or datetime.now().strftime("%Y%m%d_%H%M%S")
         self.session_dir = self.workspace / self.session_id
-        self.state_file  = self.session_dir / "state.json"
-        self.log_dir     = self.session_dir / "logs"
-        self.intermediates_dir = self.session_dir / "intermediates"
+        self.state_file = self.session_dir / "state.json"
+        self.log_dir = self.session_dir / "logs"
+        self.raw_dir = raw_dir
 
         # Create directories
-        for d in [self.session_dir, self.log_dir, self.intermediates_dir]:
+        for d in [self.session_dir, self.log_dir]:
             d.mkdir(parents=True, exist_ok=True)
 
         # Load or create state
         if self.state_file.exists():
             self._state = self._load()
+            if input_dir:
+                self._state["input_dir"] = input_dir
+            if raw_dir:
+                self._state["raw_dir"] = raw_dir
+            self.save()
             logger.info(f"Resumed session {self.session_id} from {self.state_file}")
         else:
             self._state = new_session(self.session_id, input_dir, raw_dir)
@@ -144,7 +156,8 @@ class SessionState:
     def groups_needing_step(self, step: str) -> list[dict]:
         """Return groups where `step` is pending or failed."""
         return [
-            g for g in self.all_groups()
+            g
+            for g in self.all_groups()
             if g["steps"][step]["status"] in (StepStatus.PENDING, StepStatus.FAILED)
         ]
 
@@ -153,17 +166,37 @@ class SessionState:
     # ------------------------------------------------------------------
 
     def step_start(self, group_id: str, step: str):
-        self._set_step(group_id, step, status=StepStatus.RUNNING, ts=datetime.now().isoformat())
+        self._set_step(
+            group_id, step, status=StepStatus.RUNNING, ts=datetime.now().isoformat()
+        )
 
     def step_done(self, group_id: str, step: str, output: str | None = None):
-        self._set_step(group_id, step, status=StepStatus.DONE, output=output, ts=datetime.now().isoformat())
+        self._set_step(
+            group_id,
+            step,
+            status=StepStatus.DONE,
+            output=output,
+            ts=datetime.now().isoformat(),
+        )
 
     def step_failed(self, group_id: str, step: str, error: str):
-        self._set_step(group_id, step, status=StepStatus.FAILED, error=error, ts=datetime.now().isoformat())
+        self._set_step(
+            group_id,
+            step,
+            status=StepStatus.FAILED,
+            error=error,
+            ts=datetime.now().isoformat(),
+        )
         logger.error(f"Step {step} failed for {group_id}: {error}")
 
     def step_skip(self, group_id: str, step: str, reason: str = ""):
-        self._set_step(group_id, step, status=StepStatus.SKIPPED, error=reason, ts=datetime.now().isoformat())
+        self._set_step(
+            group_id,
+            step,
+            status=StepStatus.SKIPPED,
+            error=reason,
+            ts=datetime.now().isoformat(),
+        )
 
     def _set_step(self, group_id: str, step: str, **kwargs):
         self._state["groups"][group_id]["steps"][step].update(kwargs)
@@ -180,10 +213,12 @@ class SessionState:
     # ------------------------------------------------------------------
 
     def add_note(self, group_id: str, note: str):
-        self._state["groups"][group_id]["notes"].append({
-            "ts":   datetime.now().isoformat(),
-            "text": note,
-        })
+        self._state["groups"][group_id]["notes"].append(
+            {
+                "ts": datetime.now().isoformat(),
+                "text": note,
+            }
+        )
         self.save()
 
     # ------------------------------------------------------------------
@@ -221,11 +256,11 @@ class SessionState:
             for step, info in g["steps"].items():
                 status = info["status"]
                 icon = {
-                    StepStatus.PENDING:  "⬜",
-                    StepStatus.RUNNING:  "🔄",
-                    StepStatus.DONE:     "✅",
-                    StepStatus.FAILED:   "❌",
-                    StepStatus.SKIPPED:  "⏭ ",
+                    StepStatus.PENDING: "⬜",
+                    StepStatus.RUNNING: "🔄",
+                    StepStatus.DONE: "✅",
+                    StepStatus.FAILED: "❌",
+                    StepStatus.SKIPPED: "⏭ ",
                 }.get(status, "?")
                 lines.append(f"    {icon} {step:<20} {status}")
                 if info.get("error"):
