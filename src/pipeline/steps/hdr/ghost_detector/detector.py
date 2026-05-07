@@ -3,6 +3,7 @@ import numpy as np
 from pathlib import Path
 import logging
 import sys
+from skimage.exposure import match_histograms
 
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -10,53 +11,46 @@ logger = logging.getLogger(__name__)
 
 
 class GhostDetector:
-    """Detects ghosting artifacts in aligned images through multi-stage morphological
-    analysis and connected component filtering.
-
-    This class uses a combination of thresholding, morphological operations, and
-    area-based filtering to identify regions with significant ghosting while
-    ignoring sensor noise and micro-misalignments.
+    """Detects ghosting artifacts in aligned bracket images using multi-scale SSIM
+    and chrominance difference with adaptive thresholding.
     """
 
     def __init__(
         self,
-        threshold: int = 20,
+        threshold: int = 50,
         min_area: int = 50,
         dilation_size: int = 31,
         blur_size: int = 151,
         kernel_size: tuple = (5, 5),
+        ssim_scales: list | None = None,
+        chroma_weight: float = 0.8,
+        chroma_blur_size: int = 11,
+        chroma_normalization: float = 80.0,
+        adaptive_threshold: bool = True,
+        threshold_min: int = 25,
+        threshold_max: int = 120,
     ):
-        """Initialize the GhostDetector with processing parameters.
-
-        :param int threshold: Threshold value for binary segmentation (0-255).
-            Higher values are more selective. Default: 20
-        :param int min_area: Minimum area of connected components to keep (pixels).
-            Smaller components are filtered out. Default: 50
-        :param int dilation_size: Size of the dilation kernel for solidifying ghost
-            regions. Must be positive odd integer. Default: 31
-        :param int blur_size: Size of Gaussian blur kernel for soft mask creation.
-            Must be positive odd integer. Default: 151
-        :param tuple kernel: Size of the morphological kernel for cleaning. Default: (5, 5)
-        """
-
         self.threshold = threshold
         self.min_area = min_area
         self.dilation_size = dilation_size
         self.blur_size = blur_size
         self.kernel_size = kernel_size
+        self.ssim_scales = ssim_scales or [7, 15, 31]
+        self.chroma_weight = chroma_weight
+        self.chroma_blur_size = chroma_blur_size
+        self.chroma_normalization = chroma_normalization
+        self.adaptive_threshold = adaptive_threshold
+        self.threshold_min = threshold_min
+        self.threshold_max = threshold_max
 
     def detect_ghost_mask(
         self, ref_image_path: str, aligned_image_path: str
     ) -> np.ndarray:
         """Detect ghosting artifacts by comparing reference and aligned images.
 
-        Performs the following steps:
-        1. Load and compute absolute difference in grayscale
-        2. Binary thresholding to isolate moving regions
-        3. Morphological cleaning (open and close operations)
-        4. Connected component analysis with area filtering
-        5. Dilation to solidify ghost regions
-        6. Gaussian blur for smooth mask transitions
+        Uses multi-scale SSIM on luminance and Euclidean distance on chrominance
+        (LAB color space) to produce a dissimilarity map, then applies adaptive
+        thresholding and morphological cleanup.
 
         :param str ref_image_path: Path to reference (middle exposure) image
         :param str aligned_image_path: Path to aligned image
@@ -71,33 +65,43 @@ class GhostDetector:
                 "Could not load images. Check file paths and formats."
             )
 
-        # 1. Compute absolute difference in grayscale
-        diff = cv2.absdiff(ref_image, aligned_image)
-        if len(diff.shape) == 3:
-            diff = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
+        aligned_norm = match_histograms(
+            aligned_image, ref_image, channel_axis=-1
+        ).astype(ref_image.dtype)
 
-        # 2. Binary threshold: white = motion, black = static
-        # Ignores sensor noise and micro-alignment errors
-        _, mask = cv2.threshold(diff, self.threshold, 255, cv2.THRESH_BINARY)
+        ref_lab = cv2.cvtColor(ref_image, cv2.COLOR_BGR2LAB).astype(np.float32)
+        aligned_lab = cv2.cvtColor(aligned_norm, cv2.COLOR_BGR2LAB).astype(np.float32)
 
-        # 3. Morphological cleaning
-        # MORPH_OPEN: erode thin lines, then dilate to restore blocks
-        # MORPH_CLOSE: fill small holes within ghost regions
+        ref_L = ref_lab[:, :, 0]
+        aligned_L = aligned_lab[:, :, 0]
+
+        # Validity mask: exclude clipped highlights / crushed shadows
+        valid = (ref_L > 2) & (ref_L < 253) & (aligned_L > 2) & (aligned_L < 253)
+
+        luma_dissimilarity = self._compute_ssim_dissimilarity(ref_L, aligned_L)
+        chroma_dissimilarity = self._compute_chroma_dissimilarity(ref_lab, aligned_lab)
+
+        combined = np.maximum(luma_dissimilarity, chroma_dissimilarity * self.chroma_weight)
+        combined[~valid] = 0
+
+        diff = self._apply_threshold(combined)
+
+
+
+
+        # Morphological cleaning
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, self.kernel_size)
-        mask_cleaned = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        mask_cleaned = cv2.morphologyEx(diff, cv2.MORPH_OPEN, kernel)
         mask_cleaned = cv2.morphologyEx(mask_cleaned, cv2.MORPH_CLOSE, kernel)
 
-        # 4. Connected components analysis with area filtering
-        # Keep only components larger than min_area threshold
+        # Connected components with area filtering
         num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask_cleaned)
-
         seeds = np.zeros_like(mask_cleaned)
         for i in range(1, num_labels):
             if stats[i, cv2.CC_STAT_AREA] > self.min_area:
                 seeds[labels == i] = 255
 
-        # 5. Solidification through dilation
-        # Expand seeds to cover entire ghost objects (limbs, shadows, etc.)
+        # Dilation to solidify ghost regions
         if self.dilation_size > 0:
             kernel_dilate = cv2.getStructuringElement(
                 cv2.MORPH_ELLIPSE, (self.dilation_size, self.dilation_size)
@@ -105,18 +109,82 @@ class GhostDetector:
             seeds = cv2.dilate(seeds, kernel_dilate, iterations=1)
             seeds = cv2.morphologyEx(seeds, cv2.MORPH_CLOSE, kernel_dilate)
 
-        # 6. Gaussian blur for soft mask transitions (required for HDR merging)
+        # Gaussian blur for soft mask transitions
         blur_size = self.blur_size
         if blur_size > 0:
-            # Ensure blur_size is odd for symmetric Gaussian
             if blur_size % 2 == 0:
                 blur_size += 1
             final_ghost_mask = cv2.GaussianBlur(seeds, (blur_size, blur_size), 0)
         else:
             final_ghost_mask = seeds
 
-        # Convert to float [0.0, 1.0] range for downstream HDR merging
         return final_ghost_mask.astype(np.float32) / 255.0
+
+    def _compute_ssim_dissimilarity(
+        self, ref_gray: np.ndarray, aligned_gray: np.ndarray
+    ) -> np.ndarray:
+        """Multi-scale SSIM dissimilarity map. Returns float32 in [0, 1]."""
+        C1 = (0.01 * 255) ** 2
+        C2 = (0.03 * 255) ** 2
+
+        dissimilarity_maps = []
+        for win_size in self.ssim_scales:
+            if win_size % 2 == 0:
+                win_size += 1
+            sigma = win_size / 6.0
+            ksize = (win_size, win_size)
+
+            mu_a = cv2.GaussianBlur(ref_gray, ksize, sigma)
+            mu_b = cv2.GaussianBlur(aligned_gray, ksize, sigma)
+
+            sigma_a_sq = cv2.GaussianBlur(ref_gray ** 2, ksize, sigma) - mu_a ** 2
+            sigma_b_sq = cv2.GaussianBlur(aligned_gray ** 2, ksize, sigma) - mu_b ** 2
+            sigma_ab = cv2.GaussianBlur(ref_gray * aligned_gray, ksize, sigma) - mu_a * mu_b
+
+            numerator = (2 * mu_a * mu_b + C1) * (2 * sigma_ab + C2)
+            denominator = (mu_a ** 2 + mu_b ** 2 + C1) * (sigma_a_sq + sigma_b_sq + C2)
+
+            ssim_map = numerator / denominator
+            dissimilarity = np.clip((1.0 - ssim_map) / 2.0, 0, 1)
+            dissimilarity_maps.append(dissimilarity)
+
+        return np.maximum.reduce(dissimilarity_maps).astype(np.float32)
+
+    def _compute_chroma_dissimilarity(
+        self, ref_lab: np.ndarray, aligned_lab: np.ndarray
+    ) -> np.ndarray:
+        """Euclidean distance in a*b* space, normalized to [0, 1]."""
+        k = self.chroma_blur_size
+        if k % 2 == 0:
+            k += 1
+        ksize = (k, k)
+
+        ref_a = cv2.GaussianBlur(ref_lab[:, :, 1], ksize, 0)
+        ref_b = cv2.GaussianBlur(ref_lab[:, :, 2], ksize, 0)
+        ali_a = cv2.GaussianBlur(aligned_lab[:, :, 1], ksize, 0)
+        ali_b = cv2.GaussianBlur(aligned_lab[:, :, 2], ksize, 0)
+
+        dist = np.sqrt((ref_a - ali_a) ** 2 + (ref_b - ali_b) ** 2)
+        return np.clip(dist / self.chroma_normalization, 0, 1).astype(np.float32)
+
+    def _apply_threshold(self, combined: np.ndarray) -> np.ndarray:
+        """Convert float32 dissimilarity map [0,1] to binary uint8 mask."""
+        diff_uint8 = (combined * 255).astype(np.uint8)
+
+        if self.adaptive_threshold:
+            nonzero_pixels = diff_uint8[diff_uint8 > 5]
+            if len(nonzero_pixels) > 100:
+                otsu_thresh, _ = cv2.threshold(
+                    nonzero_pixels, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
+                )
+                effective_threshold = int(np.clip(otsu_thresh, self.threshold_min, self.threshold_max))
+            else:
+                effective_threshold = self.threshold
+        else:
+            effective_threshold = self.threshold
+
+        _, mask = cv2.threshold(diff_uint8, effective_threshold, 255, cv2.THRESH_BINARY)
+        return mask
 
     def visualize_ghosts(
         self, ref_image_path: str, ghost_mask: np.ndarray

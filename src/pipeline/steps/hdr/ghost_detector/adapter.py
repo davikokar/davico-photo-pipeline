@@ -101,11 +101,18 @@ def run(state: SessionState, config: dict, log=None) -> Path | None:
 def _build_detector(detector_cfg: dict) -> GhostDetector:
     """Instantiate GhostDetector from the ``steps.hdr.ghost_detector`` config section."""
     return GhostDetector(
-        threshold=int(detector_cfg.get("threshold", 20)),
+        threshold=int(detector_cfg.get("threshold", 50)),
         min_area=int(detector_cfg.get("min_area", 50)),
         dilation_size=int(detector_cfg.get("dilation_size", 31)),
         blur_size=int(detector_cfg.get("blur_size", 151)),
         kernel_size=tuple(detector_cfg.get("kernel_size", (5, 5))),
+        ssim_scales=detector_cfg.get("ssim_scales", [7, 15, 31]),
+        chroma_weight=float(detector_cfg.get("chroma_weight", 0.8)),
+        chroma_blur_size=int(detector_cfg.get("chroma_blur_size", 11)),
+        chroma_normalization=float(detector_cfg.get("chroma_normalization", 80.0)),
+        adaptive_threshold=bool(detector_cfg.get("adaptive_threshold", True)),
+        threshold_min=int(detector_cfg.get("threshold_min", 25)),
+        threshold_max=int(detector_cfg.get("threshold_max", 120)),
     )
 
 

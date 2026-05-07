@@ -17,6 +17,7 @@ dependencies = [
   "numpy>=1.24",
   "rawpy>=0.18",
   "lensfunpy>=1.13",
+  "scikit-image>=0.26.0"
 ]
 
 [dependency-groups]
