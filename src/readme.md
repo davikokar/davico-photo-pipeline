@@ -24,12 +24,6 @@ This step requires user approval.
 The tool generates a web browser page to help the user review and adjust the grouping.
 Once the grouping is confirmed the user can save it and place it in the session folder.
 
-TODO: we need to add a an attribute to each group, specifying if the group is an aerial image or a terrestrial image.
-This is important because for aerial images we don't have raw files, and we don't have the possibility to generate 
-exposure-normalized images, so we need to skip some steps of the pipeline for aerial hdr groups. We can try to automatically
-determine if a group is aerial or terrestrial based on the metadata of the images (make "canon" -> "terrestrial", make "dji" -> "aerial"), 
-but we need to provide the user with the possibility to adjust it in case of wrong automatic classification.
-
 TODO: we need to improve the panoramic grouping, right now it works well for aerial images, but for terrestrial images 
 it is not very accurate. We can try to use the focal length and the gps coordinates to improve the grouping, 
 but we need to provide the user with the possibility to adjust it in case of wrong automatic classification.

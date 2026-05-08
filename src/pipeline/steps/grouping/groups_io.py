@@ -13,7 +13,7 @@ session directory.
 JSON format
 -----------
 {
-  "version": 1,
+  "version": 2,
   "session_id": "20250306_173045",
   "input_dir": "/path/to/photos",
   "generated_at": "2025-03-06T17:30:45",
@@ -21,6 +21,7 @@ JSON format
     {
       "id": "group_001",
       "type": "hdr",
+      "capture_source": "terrestrial",
       "brackets": [
         {
           "shots": [
@@ -45,7 +46,7 @@ from pipeline.utils.logger import get_logger
 logger = get_logger(__name__)
 
 GROUPS_FILE_PATTERN = re.compile(r"^groups_(\d+)\.json$")
-GROUPS_FORMAT_VERSION = 1
+GROUPS_FORMAT_VERSION = 2
 
 
 # ---------------------------------------------------------------------------
@@ -140,10 +141,11 @@ def _list_group_files(session_dir: Path) -> list[tuple[int, Path]]:
 
 def _validate(data: dict):
     """Basic schema validation — raises ValueError on bad format."""
-    if data.get("version") != GROUPS_FORMAT_VERSION:
+    version = data.get("version")
+    if version not in (1, GROUPS_FORMAT_VERSION):
         raise ValueError(
-            f"Unsupported groups JSON version: {data.get('version')} "
-            f"(expected {GROUPS_FORMAT_VERSION})"
+            f"Unsupported groups JSON version: {version} "
+            f"(expected 1 or {GROUPS_FORMAT_VERSION})"
         )
     if "groups" not in data or not isinstance(data["groups"], list):
         raise ValueError("groups_json: missing or invalid 'groups' field")
@@ -187,6 +189,7 @@ def panorama_groups_to_json(pano_groups: list, input_dir: Path) -> list[dict]:
             {
                 "id": group_id,
                 "type": pg.group_type.value,
+                "capture_source": pg.capture_source.value,
                 "brackets": brackets,
             }
         )
@@ -216,6 +219,7 @@ def json_to_state_groups(groups_data: list[dict]) -> list[dict]:
             {
                 "id": g["id"],
                 "type": g["type"],
+                "capture_source": g.get("capture_source", "terrestrial"),
                 "files": all_files,
                 "brackets": g["brackets"],  # preserved for HDR merge
             }

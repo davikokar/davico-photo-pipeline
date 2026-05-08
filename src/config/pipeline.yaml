@@ -11,19 +11,15 @@ grouper:
   focal_length_tolerance: 1.0
   ev_variation_threshold: 0.8
 
-  # Visual panorama check — ORB feature matching + RANSAC homography.
+  # Visual panorama check — LoFTR feature matching + MAGSAC++ homography.
   # Set to false to disable and rely only on time+focal criteria.
   pano_visual_check: true
 
   # Fine-tuning (only used when pano_visual_check: true).
   pano_check:
-    analysis_width:   800    # px to resize images to before feature detection
-    orb_n_features:   1000   # ORB keypoints per image
-    lowe_ratio:       0.75   # Lowe ratio test for match filtering
-    min_matches:      12     # min good matches to attempt homography
-    min_inliers:      15     # min RANSAC inliers to trust the homography
-    scale_min:        0.85   # acceptable zoom-change range
-    scale_max:        1.15
+    analysis_width:   840    # px to resize images to (must be divisible by 8 for LoFTR)
+    min_correspondences: 20  # min LoFTR correspondences to attempt homography
+    min_inliers:      15     # min MAGSAC++ inliers to trust the homography
     max_rotation_deg: 20.0   # max tilt between shots (degrees)
     direction_dominance: 0.60  # fraction of motion that must be H or V
     overlap_min:      0.15   # min overlap (< = different scene)

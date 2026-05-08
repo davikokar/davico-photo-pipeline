@@ -35,6 +35,11 @@ class GroupType(str, Enum):
     HDR_PANORAMA = "hdr+panorama"
 
 
+class CaptureSource(str, Enum):
+    AERIAL = "aerial"
+    TERRESTRIAL = "terrestrial"
+
+
 # ---------------------------------------------------------------------------
 # Data model (plain dicts stored as JSON — simple and transparent)
 # ---------------------------------------------------------------------------
@@ -59,10 +64,16 @@ def _empty_steps() -> dict:
     }
 
 
-def new_group(group_id: str, files: list[str], group_type: GroupType) -> dict:
+def new_group(
+    group_id: str,
+    files: list[str],
+    group_type: GroupType,
+    capture_source: str = "terrestrial",
+) -> dict:
     return {
         "id": group_id,
         "type": group_type,
+        "capture_source": capture_source,
         "files": files,
         "steps": _empty_steps(),
         "notes": [],  # AI review notes or manual annotations
@@ -142,10 +153,18 @@ class SessionState:
     # Groups
     # ------------------------------------------------------------------
 
-    def add_group(self, group_id: str, files: list[str], group_type: GroupType):
-        self._state["groups"][group_id] = new_group(group_id, files, group_type)
+    def add_group(
+        self,
+        group_id: str,
+        files: list[str],
+        group_type: GroupType,
+        capture_source: str = "terrestrial",
+    ):
+        self._state["groups"][group_id] = new_group(
+            group_id, files, group_type, capture_source
+        )
         self.save()
-        logger.debug(f"Added group {group_id} ({group_type}, {len(files)} files)")
+        logger.debug(f"Added group {group_id} ({group_type}, {capture_source}, {len(files)} files)")
 
     def get_group(self, group_id: str) -> dict | None:
         return self._state["groups"].get(group_id)
@@ -252,7 +271,8 @@ class SessionState:
         lines.append(f"\nGroups ({len(s['groups'])}):")
 
         for gid, g in s["groups"].items():
-            lines.append(f"\n  {gid}  [{g['type']}]  {len(g['files'])} files")
+            source = g.get("capture_source", "terrestrial")
+            lines.append(f"\n  {gid}  [{g['type']}] [{source}]  {len(g['files'])} files")
             for step, info in g["steps"].items():
                 status = info["status"]
                 icon = {

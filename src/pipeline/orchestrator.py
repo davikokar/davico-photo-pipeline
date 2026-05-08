@@ -258,7 +258,9 @@ class Orchestrator:
         # Re-register groups (overwrite whatever was in state from auto-detection)
         self.state._state["groups"] = {}
         for g in state_groups:
-            self.state.add_group(g["id"], g["files"], g["type"])
+            self.state.add_group(
+                g["id"], g["files"], g["type"], g.get("capture_source", "terrestrial")
+            )
             # Preserve bracket structure for HDR step
             self.state._state["groups"][g["id"]]["brackets"] = g.get("brackets", [])
         self.state.save()
@@ -271,6 +273,12 @@ class Orchestrator:
 
     def _run_raw_to_jpg(self, group: dict, log) -> str | None:
         """Convert RAW files to JPEG derivatives required by the HDR step."""
+        if group.get("capture_source") == "aerial":
+            self.state.step_skip(
+                group["id"], "raw_to_jpg", reason="aerial group — no RAW files"
+            )
+            return None
+
         from pipeline.steps.hdr.raw_to_jpg.converter import (
             convert_group_from_groups_json,
         )

@@ -61,7 +61,7 @@ def _register_groups_in_state(
     for i, pg in enumerate(pano_groups):
         group_id = f"group_{i + 1:03d}"
         file_names = [s.path.name for s in pg.all_shots]
-        state.add_group(group_id, file_names, pg.group_type)
+        state.add_group(group_id, file_names, pg.group_type, pg.capture_source.value)
         state.step_done(group_id, "grouping")
 
 

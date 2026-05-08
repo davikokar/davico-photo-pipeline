@@ -17,7 +17,7 @@ from pathlib import Path
 
 from pipeline.utils.exif import ExifData
 from pipeline.utils.logger import get_logger
-from pipeline.state import SessionState, GroupType
+from pipeline.state import SessionState, GroupType, CaptureSource
 from pipeline.steps.grouping.grouper import (
     _form_brackets,
     _form_panorama_groups,
@@ -44,6 +44,7 @@ def make_shot(
     t: float,  # seconds offset from BASE_TIME
     ev: float = 0.0,
     focal: float = 24.0,
+    camera_make: str = "Canon",
 ) -> ExifData:
     ts = datetime.fromtimestamp(BASE_TIME + t)
     return ExifData(
@@ -55,6 +56,7 @@ def make_shot(
         shutter=2 ** (-ev),  # reverse-engineer shutter from EV (simplified)
         iso=100,
         ev_computed=ev,
+        camera_make=camera_make,
     )
 
 
@@ -398,6 +400,40 @@ def test_step_offsets_asymmetric_bracket():
     logger.info("✅ test_step_offsets_asymmetric_bracket passed")
 
 
+def test_capture_source_terrestrial():
+    """Canon shots → terrestrial."""
+    shots = [make_shot("IMG_001.jpg", t=0, ev=0, camera_make="Canon")]
+    brackets = _form_brackets(shots, MAX_HDR_GAP)
+    groups = _form_panorama_groups(brackets, MAX_PANO_GAP, FOCAL_LENGTH_TOLERANCE)
+    assert groups[0].capture_source == CaptureSource.TERRESTRIAL
+    logger.info("✅ test_capture_source_terrestrial passed")
+
+
+def test_capture_source_aerial():
+    """DJI shots → aerial."""
+    shots = [
+        make_shot("DJI_001.jpg", t=0.0, ev=-2, camera_make="DJI"),
+        make_shot("DJI_002.jpg", t=0.4, ev=0, camera_make="DJI"),
+        make_shot("DJI_003.jpg", t=0.8, ev=+2, camera_make="DJI"),
+    ]
+    brackets = _form_brackets(shots, MAX_HDR_GAP)
+    groups = _form_panorama_groups(brackets, MAX_PANO_GAP, FOCAL_LENGTH_TOLERANCE)
+    assert groups[0].capture_source == CaptureSource.AERIAL
+    logger.info("✅ test_capture_source_aerial passed")
+
+
+def test_capture_source_in_json():
+    """capture_source appears in panorama_groups_to_json output."""
+    from pipeline.steps.grouping.groups_io import panorama_groups_to_json
+
+    shots = [make_shot("IMG_001.jpg", t=0, ev=0, camera_make="DJI")]
+    brackets = _form_brackets(shots, MAX_HDR_GAP)
+    groups = _form_panorama_groups(brackets, MAX_PANO_GAP, FOCAL_LENGTH_TOLERANCE)
+    json_data = panorama_groups_to_json(groups, Path("/fake"))
+    assert json_data[0]["capture_source"] == "aerial"
+    logger.info("✅ test_capture_source_in_json passed")
+
+
 if __name__ == "__main__":
     tests = [
         test_single,
@@ -416,6 +452,9 @@ if __name__ == "__main__":
         test_step_offsets_single_shot,
         test_step_offsets_fractional_ev,
         test_step_offsets_asymmetric_bracket,
+        test_capture_source_terrestrial,
+        test_capture_source_aerial,
+        test_capture_source_in_json,
     ]
     failed = 0
     for t in tests:

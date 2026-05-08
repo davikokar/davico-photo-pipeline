@@ -2,8 +2,14 @@
 pano_checker.py — visual overlap verification for panorama grouping.
 
 Determines whether two images are adjacent frames of a panoramic sequence
-by estimating their geometric relationship via feature matching and RANSAC
-homography analysis.
+by estimating their geometric relationship via LoFTR feature matching and
+MAGSAC++ homography analysis.
+
+Why LoFTR over ORB
+------------------
+ORB (binary descriptor, Hamming matching) is fast but fails on terrestrial
+scenes with 3D parallax, repetitive structures, and low-texture overlap
+zones. LoFTR is a learned dense matcher that handles these cases robustly.
 
 Why homography analysis rather than just inlier count
 ------------------------------------------------------
@@ -22,10 +28,10 @@ All four conditions must hold for `is_panoramic_overlap = True`.
 
 Speed
 -----
-Both images are resized to ANALYSIS_WIDTH pixels wide before any processing.
-At 800px, ORB runs in ~20-50ms per image and matching is ~5ms.
-Total per-pair cost: ~100ms including I/O. For a 20-bracket session this
-adds at most 2-3 seconds to the grouping step.
+Both images are resized to ANALYSIS_WIDTH pixels wide before LoFTR inference.
+At 840px, LoFTR runs in ~200ms per pair on CPU, ~50ms on GPU.
+For a 20-bracket session this adds 4s (CPU) or 1s (GPU) total — acceptable
+for a one-time grouping step.
 
 For HDR brackets, the caller should pass the representative (0-EV) shot
 rather than the dark or bright exposure.
@@ -35,10 +41,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import sys
 from typing import Optional
 
 import cv2
 import numpy as np
+import torch
 
 from pipeline.utils.logger import get_logger
 
@@ -49,26 +57,15 @@ logger = get_logger(__name__)
 # Tunable constants
 # ---------------------------------------------------------------------------
 
-# Width (px) to which images are resized before feature detection.
-# Smaller = faster but fewer features in low-overlap regions.
-ANALYSIS_WIDTH = 800
+# Width (px) to which images are resized before LoFTR inference.
+# Must be divisible by 8 for LoFTR architecture constraints.
+ANALYSIS_WIDTH = 840
 
-# ORB: max features to detect per image.
-ORB_N_FEATURES = 1000
+# Minimum LoFTR correspondences to attempt homography estimation.
+MIN_CORRESPONDENCES = 20
 
-# Lowe ratio test threshold for match filtering.
-LOWE_RATIO = 0.75
-
-# Minimum matches to attempt homography estimation.
-MIN_MATCHES_FOR_HOMOGRAPHY = 12
-
-# Minimum RANSAC inliers to trust the homography.
+# Minimum MAGSAC++ inliers to trust the homography.
 MIN_INLIERS = 15
-
-# Acceptable scale range (ratio of image scales between two shots).
-# Anything outside this means there was a zoom change — not panoramic.
-SCALE_MIN = 0.85
-SCALE_MAX = 1.15
 
 # Maximum absolute rotation between shots (degrees).
 MAX_ROTATION_DEG = 20.0
@@ -122,12 +119,8 @@ class PanoCheckResult:
 @dataclass
 class PanoCheckConfig:
     analysis_width: int = ANALYSIS_WIDTH
-    orb_n_features: int = ORB_N_FEATURES
-    lowe_ratio: float = LOWE_RATIO
-    min_matches: int = MIN_MATCHES_FOR_HOMOGRAPHY
+    min_correspondences: int = MIN_CORRESPONDENCES
     min_inliers: int = MIN_INLIERS
-    scale_min: float = SCALE_MIN
-    scale_max: float = SCALE_MAX
     max_rotation_deg: float = MAX_ROTATION_DEG
     direction_dominance: float = DIRECTION_DOMINANCE
     overlap_min: float = OVERLAP_MIN
@@ -141,14 +134,34 @@ class PanoCheckConfig:
 
 
 # ---------------------------------------------------------------------------
-# Image loading and resizing
+# LoFTR singleton (lazy-loaded on first use)
+# ---------------------------------------------------------------------------
+
+_loftr_matcher = None
+_loftr_device = None
+
+
+def _get_loftr() -> tuple:
+    """Return (matcher, device) — loads model on first call, reuses thereafter."""
+    global _loftr_matcher, _loftr_device
+    if _loftr_matcher is None:
+        import kornia as K
+
+        _loftr_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        _loftr_matcher = K.feature.LoFTR(pretrained="outdoor").to(_loftr_device).eval()
+        logger.info(f"LoFTR loaded on {_loftr_device}")
+    return _loftr_matcher, _loftr_device
+
+
+# ---------------------------------------------------------------------------
+# Image loading and LoFTR matching
 # ---------------------------------------------------------------------------
 
 
-def _load_resized(path: Path, target_width: int) -> Optional[np.ndarray]:
+def _load_gray(path: Path, target_width: int) -> Optional[tuple[np.ndarray, float]]:
     """
-    Load a JPEG and resize to target_width maintaining aspect ratio.
-    Returns a greyscale uint8 array, or None on read failure.
+    Load a JPEG, resize to target_width maintaining aspect ratio.
+    Returns (greyscale uint8 array, scale_factor) or None on failure.
     """
     img = cv2.imread(str(path))
     if img is None:
@@ -157,72 +170,45 @@ def _load_resized(path: Path, target_width: int) -> Optional[np.ndarray]:
     h, w = img.shape[:2]
     scale = target_width / w
     new_h = int(h * scale)
+    # Round height to multiple of 8 for LoFTR
+    new_h = (new_h // 8) * 8
     resized = cv2.resize(img, (target_width, new_h), interpolation=cv2.INTER_AREA)
-    return cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+    gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+    return gray, scale
 
 
-# ---------------------------------------------------------------------------
-# Feature detection and matching
-# ---------------------------------------------------------------------------
+def _to_loftr_tensor(gray: np.ndarray, device: torch.device) -> torch.Tensor:
+    """Convert grayscale numpy array to LoFTR-compatible [1, 1, H, W] tensor."""
+    t = torch.from_numpy(gray).float() / 255.0
+    return t.unsqueeze(0).unsqueeze(0).to(device)
 
 
-def _detect_and_match(
+def _match_loftr(
     gray_a: np.ndarray,
     gray_b: np.ndarray,
-    cfg: PanoCheckConfig,
-) -> list[cv2.DMatch]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
-    ORB feature detection + BFMatcher with Lowe ratio test.
+    Run LoFTR matching on two grayscale images.
 
-    ORB is chosen over SIFT for speed and because it is free (no patent
-    issues). At ANALYSIS_WIDTH=800 it finds 500-1000 keypoints per image
-    in ~20ms, which is more than enough for panorama detection.
+    Returns (keypoints_a, keypoints_b) as Nx2 float32 arrays in resized-image
+    coordinates. Returns empty arrays if matching fails.
     """
-    orb = cv2.ORB_create(nfeatures=cfg.orb_n_features)
-    kp_a, des_a = orb.detectAndCompute(gray_a, None)
-    kp_b, des_b = orb.detectAndCompute(gray_b, None)
+    matcher, device = _get_loftr()
 
-    if des_a is None or des_b is None or len(des_a) < 4 or len(des_b) < 4:
-        return []
+    t_a = _to_loftr_tensor(gray_a, device)
+    t_b = _to_loftr_tensor(gray_b, device)
 
-    # BFMatcher with Hamming distance (correct for ORB binary descriptors)
-    matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
-    # knnMatch returns 2 neighbours per descriptor for the ratio test
-    raw = matcher.knnMatch(des_a, des_b, k=2)
+    with torch.inference_mode():
+        correspondences = matcher({"image0": t_a, "image1": t_b})
 
-    # Lowe ratio test: keep matches where best match is significantly
-    # better than second-best (eliminates ambiguous matches)
-    good = [m for m, n in raw if m.distance < cfg.lowe_ratio * n.distance]
-    return good
+    kpts_a = correspondences["keypoints0"].cpu().numpy()
+    kpts_b = correspondences["keypoints1"].cpu().numpy()
+    return kpts_a, kpts_b
 
 
 # ---------------------------------------------------------------------------
 # Homography estimation and analysis
 # ---------------------------------------------------------------------------
-
-
-def _estimate_homography(
-    kp_a: list,
-    kp_b: list,
-    good_matches: list[cv2.DMatch],
-    cfg: PanoCheckConfig,
-) -> tuple[Optional[np.ndarray], int]:
-    """
-    RANSAC homography estimation.
-
-    Returns (H, n_inliers) or (None, 0) if estimation fails.
-    """
-    if len(good_matches) < cfg.min_matches:
-        return None, 0
-
-    pts_a = np.float32([kp_a[m.queryIdx].pt for m in good_matches])
-    pts_b = np.float32([kp_b[m.trainIdx].pt for m in good_matches])
-
-    H, mask = cv2.findHomography(pts_a, pts_b, cv2.RANSAC, ransacReprojThreshold=5.0)
-    if H is None or mask is None:
-        return None, 0
-
-    return H, int(mask.sum())
 
 
 def _analyse_homography(
@@ -232,89 +218,86 @@ def _analyse_homography(
     cfg: PanoCheckConfig,
 ) -> tuple[bool, str, float, float, str]:
     """
-    Decompose and evaluate the homography to determine if it represents
-    a valid panoramic relationship.
+    Evaluate the homography by warping image A's corners into image B's
+    coordinate system and measuring the geometric relationship.
 
     Returns:
         (is_pano, direction, overlap_pct, confidence, reason)
 
-    Decomposition
-    -------------
-    H (3×3) maps points in image A to image B.
-    For a panoramic shot, H should approximate a rigid-body transform
-    (translation + small rotation, scale ≈ 1).
-
-    From the top-left 2×2 submatrix:
-        scale    = sqrt(h00² + h10²)    (length of first column vector)
-        rotation = atan2(h10, h00)      (angle of first column vector)
-
-    Translation in image A coordinates (normalizing by h22 for
-    perspective correction):
-        tx = h02 / h22
-        ty = h12 / h22
+    Unlike affine decomposition (which breaks on perspective homographies),
+    this approach works correctly for real panoramic rotations where the
+    perspective terms in H are significant.
     """
-    # Normalize (perspective division)
+    # Normalize
     h22 = H[2, 2]
     if abs(h22) < 1e-6:
         return False, "none", 0.0, 0.9, "degenerate homography (h22≈0)"
-
     H = H / h22
 
-    # Scale: length of the first column of the rotation-scale submatrix
-    scale = float(np.sqrt(H[0, 0] ** 2 + H[1, 0] ** 2))
+    # Warp corners of image A into image B's coordinate system
+    corners_a = np.float32([[0, 0], [img_w, 0], [img_w, img_h], [0, img_h]])
+    corners_warped = cv2.perspectiveTransform(
+        corners_a.reshape(-1, 1, 2), H
+    ).reshape(-1, 2)
 
-    # Rotation angle (degrees)
-    rotation_deg = float(np.degrees(np.arctan2(H[1, 0], H[0, 0])))
+    # Check the warped quad is convex (degenerate H can produce bowties)
+    if not cv2.isContourConvex(corners_warped.astype(np.float32)):
+        return False, "none", 0.0, 0.8, "degenerate homography (non-convex warp)"
 
-    # Translation vector (in resized-image pixels)
-    tx = float(H[0, 2])
-    ty = float(H[1, 2])
+    original_area = float(img_w * img_h)
 
     reasons = []
     failures = []
 
-    # ── Check scale ──────────────────────────────────────────────────────
-    if not (cfg.scale_min <= scale <= cfg.scale_max):
-        failures.append(f"scale={scale:.2f} outside [{cfg.scale_min},{cfg.scale_max}]")
-    else:
-        reasons.append(f"scale={scale:.2f}✓")
+    # NOTE: No scale check here. For a panoramic rotation (camera rotating
+    # in place), the perspective projection of image A into B's plane
+    # naturally covers a larger area — this is NOT zoom. Zoom is already
+    # detected by the focal length comparison in the grouper pre-filter.
 
-    # ── Check rotation ───────────────────────────────────────────────────
+    # ── Check rotation via top edge angle ────────────────────────────────
+    top_edge = corners_warped[1] - corners_warped[0]  # top-right minus top-left
+    rotation_deg = float(np.degrees(np.arctan2(top_edge[1], top_edge[0])))
     abs_rot = abs(rotation_deg)
+
     if abs_rot > cfg.max_rotation_deg:
         failures.append(f"rotation={rotation_deg:.1f}° > {cfg.max_rotation_deg}°")
     else:
         reasons.append(f"rot={rotation_deg:.1f}°✓")
 
-    # ── Determine translation direction ──────────────────────────────────
+    # ── Determine direction from center displacement ─────────────────────
+    center_b = np.array([img_w / 2.0, img_h / 2.0])
+    center_warped = np.mean(corners_warped, axis=0)
+    displacement = center_warped - center_b
+    tx, ty = float(displacement[0]), float(displacement[1])
     t_mag = float(np.sqrt(tx**2 + ty**2))
 
     if t_mag < 2.0:
-        # Essentially no translation → same scene, not a panorama pair
         failures.append(f"translation too small (|t|={t_mag:.1f}px)")
         direction = "none"
         overlap_pct = 100.0
     else:
-        h_fraction = abs(tx) / t_mag  # fraction of motion that is horizontal
+        h_fraction = abs(tx) / t_mag
         v_fraction = abs(ty) / t_mag
 
         if h_fraction >= cfg.direction_dominance:
             direction = "horizontal"
-            # Overlap: fraction of image width NOT displaced
-            overlap_pct = max(0.0, (img_w - abs(tx)) / img_w * 100.0)
         elif v_fraction >= cfg.direction_dominance:
             direction = "vertical"
-            overlap_pct = max(0.0, (img_h - abs(ty)) / img_h * 100.0)
         else:
-            # Diagonal translation: probably not a proper panorama,
-            # but could be handheld with a lot of drift — flag as ambiguous
             direction = "ambiguous"
-            overlap_pct = max(0.0, (img_w - abs(tx)) / img_w * 100.0)
             failures.append(
                 f"diagonal translation (h={h_fraction:.0%}, v={v_fraction:.0%})"
             )
 
         reasons.append(f"dir={direction} tx={tx:.0f}px ty={ty:.0f}px")
+
+        # ── Compute overlap via polygon intersection ─────────────────────
+        rect_b = np.float32([[0, 0], [img_w, 0], [img_w, img_h], [0, img_h]])
+        intersection_area, _ = cv2.intersectConvexConvex(
+            corners_warped.astype(np.float32),
+            rect_b,
+        )
+        overlap_pct = float(intersection_area) / original_area * 100.0
 
     # ── Check overlap range ───────────────────────────────────────────────
     overlap_frac = overlap_pct / 100.0
@@ -333,10 +316,9 @@ def _analyse_homography(
     # ── Final decision ────────────────────────────────────────────────────
     is_pano = len(failures) == 0 and direction not in ("none", "ambiguous")
 
-    # Confidence: starts at 1.0, penalised by the severity of each failure
     confidence = 1.0
     for f in failures:
-        confidence *= 0.5  # each failure halves confidence
+        confidence *= 0.5
     if direction == "ambiguous":
         confidence *= 0.7
 
@@ -375,50 +357,47 @@ def check_panoramic_overlap(
     result = PanoCheckResult()
 
     # ── Load and resize ───────────────────────────────────────────────────
-    gray_a = _load_resized(path_a, cfg.analysis_width)
-    gray_b = _load_resized(path_b, cfg.analysis_width)
+    loaded_a = _load_gray(path_a, cfg.analysis_width)
+    loaded_b = _load_gray(path_b, cfg.analysis_width)
 
-    if gray_a is None or gray_b is None:
+    if loaded_a is None or loaded_b is None:
         result.reason = "could not load one or both images"
         result.confidence = 0.0
         return result
 
+    gray_a, scale_a = loaded_a
+    gray_b, scale_b = loaded_b
+
     img_h, img_w = gray_a.shape
 
-    # ── Feature detection and matching ────────────────────────────────────
-    orb = cv2.ORB_create(nfeatures=cfg.orb_n_features)
-    kp_a, des_a = orb.detectAndCompute(gray_a, None)
-    kp_b, des_b = orb.detectAndCompute(gray_b, None)
+    # ── LoFTR feature matching ────────────────────────────────────────────
+    kpts_a, kpts_b = _match_loftr(gray_a, gray_b)
 
-    if des_a is None or des_b is None or len(des_a) < 4 or len(des_b) < 4:
-        result.reason = (
-            f"too few features: A={len(kp_a) if kp_a else 0} "
-            f"B={len(kp_b) if kp_b else 0}"
-        )
-        result.confidence = 0.1
-        return result
-
-    matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
-    raw = matcher.knnMatch(des_a, des_b, k=2)
-    good = [m for m, n in raw if m.distance < cfg.lowe_ratio * n.distance]
-
+    n_correspondences = len(kpts_a)
     log.debug(
         f"  {path_a.name}↔{path_b.name}: "
-        f"{len(kp_a)} kp_A / {len(kp_b)} kp_B / {len(good)} good matches"
+        f"{n_correspondences} LoFTR correspondences"
     )
 
-    if len(good) < cfg.min_matches:
-        result.reason = f"too few good matches ({len(good)} < {cfg.min_matches})"
+    if n_correspondences < cfg.min_correspondences:
+        result.reason = (
+            f"too few correspondences ({n_correspondences} < {cfg.min_correspondences})"
+        )
         result.confidence = 0.2
         return result
 
-    # ── RANSAC homography ─────────────────────────────────────────────────
-    pts_a = np.float32([kp_a[m.queryIdx].pt for m in good])
-    pts_b = np.float32([kp_b[m.trainIdx].pt for m in good])
-    H, mask = cv2.findHomography(pts_a, pts_b, cv2.RANSAC, ransacReprojThreshold=5.0)
+    # ── MAGSAC++ homography ───────────────────────────────────────────────
+    H, mask = cv2.findHomography(
+        kpts_a,
+        kpts_b,
+        method=cv2.USAC_MAGSAC,
+        ransacReprojThreshold=3.0,
+        maxIters=20000,
+        confidence=0.999,
+    )
 
     if H is None or mask is None:
-        result.reason = f"RANSAC failed ({len(good)} matches)"
+        result.reason = f"MAGSAC++ failed ({n_correspondences} correspondences)"
         result.confidence = 0.2
         return result
 
@@ -436,7 +415,7 @@ def check_panoramic_overlap(
     )
 
     # Scale confidence by inlier ratio (more inliers = more trustworthy H)
-    inlier_ratio = n_inliers / max(len(good), 1)
+    inlier_ratio = n_inliers / max(n_correspondences, 1)
     confidence = confidence * (0.5 + 0.5 * inlier_ratio)
 
     result.is_panoramic_overlap = is_pano
@@ -447,3 +426,42 @@ def check_panoramic_overlap(
 
     log.debug(f"  → {result}")
     return result
+
+# ══════════════════════════════════════════════════════════════
+# Entry point
+# ══════════════════════════════════════════════════════════════
+#
+# Example usage:
+#   python -m pipeline.steps.grouping.pano_checker '/mnt/c/Temp/pipeline_tests/canon/original/0H8A4482.JPG' '/mnt/c/Temp/pipeline_tests/canon/original/0H8A4485.JPG'
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        print(
+            "Usage: python pano_checker.py path_to_image_A path_to_image_B"
+        )
+        sys.exit(1)
+
+    path_a = sys.argv[1]
+    path_b = sys.argv[2]
+    
+    configuration = PanoCheckConfig(
+        analysis_width=ANALYSIS_WIDTH,
+        min_correspondences=MIN_CORRESPONDENCES,
+        min_inliers=MIN_INLIERS,
+        scale_min=SCALE_MIN,
+        scale_max=SCALE_MAX,
+        max_rotation_deg=MAX_ROTATION_DEG,
+        direction_dominance=DIRECTION_DOMINANCE,
+        overlap_min=OVERLAP_MIN,
+        overlap_max=OVERLAP_MAX,
+        min_confidence_to_override=MIN_CONFIDENCE_TO_OVERRIDE,
+    )
+
+
+    panocheck_result = check_panoramic_overlap(
+        Path(path_a),
+        Path(path_b),
+        cfg=configuration,
+    )
+
+    print(panocheck_result)

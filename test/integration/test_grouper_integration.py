@@ -15,8 +15,11 @@ logger = get_logger("integration_test")
 
 
 # @pytest.mark.parametrize("input_folder", ['C:\\Temp\\pipeline_tests\\mavic'])
-@pytest.mark.parametrize("input_folder", ["C:\\Temp\\pipeline_tests\\canon\\original"])
-@pytest.mark.parametrize("output_folder", ["C:\\Temp\\pipeline_tests\\output"])
+# @pytest.mark.parametrize("input_folder", ["C:\\Temp\\pipeline_tests\\canon\\original"])
+# @pytest.mark.parametrize("output_folder", ["C:\\Temp\\pipeline_tests\\output"])
+@pytest.mark.parametrize("input_folder", ['/mnt/c/Temp/pipeline_tests/mavic'])
+# @pytest.mark.parametrize("input_folder", ['/mnt/c/Temp/pipeline_tests/canon/original'])
+@pytest.mark.parametrize("output_folder", ['/mnt/c/Temp/pipeline_tests/output'])
 def test_grouper_integration(input_folder, output_folder):
     """
     Args:

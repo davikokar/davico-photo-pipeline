@@ -123,8 +123,12 @@ class GhostDetector:
     def _compute_ssim_dissimilarity(
         self, ref_gray: np.ndarray, aligned_gray: np.ndarray
     ) -> np.ndarray:
-        """Multi-scale SSIM dissimilarity map. Returns float32 in [0, 1]."""
-        C1 = (0.01 * 255) ** 2
+        """Multi-scale structural dissimilarity map (luminance-invariant).
+
+        Uses only the contrast-structure component of SSIM, dropping the luminance
+        term entirely. This makes the comparison purely about texture/edges,
+        ignoring local brightness differences between brackets.
+        """
         C2 = (0.03 * 255) ** 2
 
         dissimilarity_maps = []
@@ -141,11 +145,12 @@ class GhostDetector:
             sigma_b_sq = cv2.GaussianBlur(aligned_gray ** 2, ksize, sigma) - mu_b ** 2
             sigma_ab = cv2.GaussianBlur(ref_gray * aligned_gray, ksize, sigma) - mu_a * mu_b
 
-            numerator = (2 * mu_a * mu_b + C1) * (2 * sigma_ab + C2)
-            denominator = (mu_a ** 2 + mu_b ** 2 + C1) * (sigma_a_sq + sigma_b_sq + C2)
+            # Contrast-structure only: invariant to local mean (brightness)
+            numerator = 2 * sigma_ab + C2
+            denominator = sigma_a_sq + sigma_b_sq + C2
 
-            ssim_map = numerator / denominator
-            dissimilarity = np.clip((1.0 - ssim_map) / 2.0, 0, 1)
+            cs_map = numerator / denominator
+            dissimilarity = np.clip((1.0 - cs_map) / 2.0, 0, 1)
             dissimilarity_maps.append(dissimilarity)
 
         return np.maximum.reduce(dissimilarity_maps).astype(np.float32)

@@ -20,7 +20,7 @@ import json
 from io import BytesIO
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 from pipeline.utils.logger import get_logger
 
@@ -37,7 +37,9 @@ THUMB_HEIGHT = 110  # px
 def _b64_thumb(img_path: Path, height: int = THUMB_HEIGHT) -> str:
     """Return a base64 data-URI thumbnail, or a grey placeholder on error."""
     try:
-        img = Image.open(img_path).convert("RGB")
+        img = Image.open(img_path)
+        img = ImageOps.exif_transpose(img)
+        img = img.convert("RGB")
         ratio = img.width / img.height
         img = img.resize((int(height * ratio), height), Image.LANCZOS)
         buf = BytesIO()
@@ -435,6 +437,18 @@ function buildGroupCard(g, gi) {{
   }});
   header.appendChild(typeSelect);
 
+  const sourceSelect = el('select', 'group-type-select');
+  ['terrestrial','aerial'].forEach(s => {{
+    const opt = document.createElement('option');
+    opt.value = s; opt.textContent = s;
+    if (s === (g.capture_source || 'terrestrial')) opt.selected = true;
+    sourceSelect.appendChild(opt);
+  }});
+  sourceSelect.addEventListener('change', e => {{
+    groups[gi].capture_source = e.target.value;
+  }});
+  header.appendChild(sourceSelect);
+
   const meta = el('span', 'group-meta');
   meta.textContent = metaText(g);
   header.appendChild(meta);
@@ -655,6 +669,7 @@ function extractToNewGroup(groupIdx, bracketIdx) {{
   const newGroup = {{
     id:       '__new__',   // placeholder, renumbered below
     type:     'single',
+    capture_source: groups[groupIdx].capture_source || 'terrestrial',
     brackets: [bracket],
   }};
   groups.splice(groupIdx + 1, 0, newGroup);
@@ -691,7 +706,7 @@ function autoType(groupIdx) {{
 
 function addGroup() {{
   const newId = 'group_' + String(groups.length + 1).padStart(3, '0');
-  groups.push({{ id: newId, type: 'single', brackets: [] }});
+  groups.push({{ id: newId, type: 'single', capture_source: 'terrestrial', brackets: [] }});
   render();
   toast('New group added', 'ok');
 }}
@@ -720,7 +735,7 @@ function exportJSON() {{
   }}
 
   const payload = {{
-    version:      1,
+    version:      2,
     session_id:   SESSION,
     input_dir:    INPUT_DIR,
     generated_at: new Date().toISOString(),

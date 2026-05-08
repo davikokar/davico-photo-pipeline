@@ -196,6 +196,12 @@ class PanoramaGroup:
             return GroupType.HDR
         return GroupType.SINGLE
 
+    @property
+    def capture_source(self):
+        from pipeline.steps.grouping.source_classifier import classify_group
+
+        return classify_group(self.all_shots)
+
 
 # ---------------------------------------------------------------------------
 # Step 1 — form HDR brackets from raw shot list
