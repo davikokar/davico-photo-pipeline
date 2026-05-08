@@ -113,6 +113,8 @@ def _build_detector(detector_cfg: dict) -> GhostDetector:
         adaptive_threshold=bool(detector_cfg.get("adaptive_threshold", True)),
         threshold_min=int(detector_cfg.get("threshold_min", 25)),
         threshold_max=int(detector_cfg.get("threshold_max", 120)),
+        clip_low=int(detector_cfg.get("clip_low", 10)),
+        clip_high=int(detector_cfg.get("clip_high", 245)),
     )
 
 
@@ -131,6 +133,7 @@ def _process_bracket(
     """Detect ghost masks for every aligned non-reference shot in one bracket."""
     reference_entry = bracket.get("reference")
     aligned_normalized = bracket.get("aligned_normalized", [])
+    aligned_originals = bracket.get("aligned_originals", [])
 
     if reference_entry is None or not aligned_normalized:
         log.info(
@@ -139,6 +142,10 @@ def _process_bracket(
         )
         return None
 
+    originals_by_offset = {
+        float(entry["step_offset"]): entry for entry in aligned_originals
+    }
+
     reference_path = (session_dir / reference_entry["relative_path"]).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -146,11 +153,22 @@ def _process_bracket(
     ref_stem = reference_path.stem
 
     for aligned in aligned_normalized:
-        aligned_path = (session_dir / aligned["relative_path"]).resolve()
-        mask = detector.detect_ghost_mask(reference_path, aligned_path)
+        normalized_path = (session_dir / aligned["relative_path"]).resolve()
+
+        offset = float(aligned.get("step_offset", 0.0))
+        original_entry = originals_by_offset.get(offset)
+        if original_entry is None:
+            log.warning(
+                "ghost_detection: no matching original for %s (offset %.1f) — skipping",
+                aligned.get("filename"), offset,
+            )
+            continue
+        original_path = (session_dir / original_entry["relative_path"]).resolve()
+
+        mask = detector.detect_ghost_mask(reference_path, normalized_path, original_path)
         coverage_pct = float((mask > 0).sum()) / mask.size * 100.0
 
-        mask_filename = f"ghost_mask_{ref_stem}_vs_{aligned_path.stem}.jpg"
+        mask_filename = f"ghost_mask_{ref_stem}_vs_{normalized_path.stem}.jpg"
         mask_path = output_dir / mask_filename
         cv2.imwrite(str(mask_path), (mask * 255).astype(np.uint8))
 
@@ -168,7 +186,7 @@ def _process_bracket(
             _write_diagnostic(
                 output_dir=output_dir,
                 reference_path=reference_path,
-                aligned_path=aligned_path,
+                aligned_path=normalized_path,
                 mask=mask,
                 detector=detector,
                 log=log,

@@ -29,6 +29,8 @@ class GhostDetector:
         adaptive_threshold: bool = True,
         threshold_min: int = 25,
         threshold_max: int = 120,
+        clip_low: int = 10,
+        clip_high: int = 245,
     ):
         self.threshold = threshold
         self.min_area = min_area
@@ -42,31 +44,48 @@ class GhostDetector:
         self.adaptive_threshold = adaptive_threshold
         self.threshold_min = threshold_min
         self.threshold_max = threshold_max
+        self.clip_low = clip_low
+        self.clip_high = clip_high
 
     def detect_ghost_mask(
-        self, ref_image_path: str, aligned_image_path: str
+        self,
+        ref_image_path: str,
+        normalized_image_path: str,
+        original_image_path: str,
     ) -> np.ndarray:
-        """Detect ghosting artifacts by comparing reference and aligned images.
+        """Detect ghosting artifacts by comparing reference and normalized images.
 
-        Uses multi-scale SSIM on luminance and Euclidean distance on chrominance
-        (LAB color space) to produce a dissimilarity map, then applies adaptive
-        thresholding and morphological cleanup.
+        Uses the original (non-normalized) image to build a validity mask that
+        excludes clipped highlights and crushed shadows, then performs multi-scale
+        SSIM on luminance and Euclidean distance on chrominance (LAB color space)
+        between reference and normalized images.
 
         :param str ref_image_path: Path to reference (middle exposure) image
-        :param str aligned_image_path: Path to aligned image
+        :param str normalized_image_path: Path to aligned, exposure-normalized image
+        :param str original_image_path: Path to aligned, non-normalized image (used for clip mask)
         :return: Ghost mask with values in [0.0, 1.0] range
         :rtype: np.ndarray
         """
         ref_image = cv2.imread(str(ref_image_path))
-        aligned_image = cv2.imread(str(aligned_image_path))
+        normalized_image = cv2.imread(str(normalized_image_path))
+        original_image = cv2.imread(str(original_image_path))
 
-        if ref_image is None or aligned_image is None:
+        if ref_image is None or normalized_image is None or original_image is None:
             raise FileNotFoundError(
                 "Could not load images. Check file paths and formats."
             )
 
+        # Build validity mask from the original (non-normalized) bracket image
+        # where clipped highlights/shadows are still identifiable
+        ref_gray = cv2.cvtColor(ref_image, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        original_gray = cv2.cvtColor(original_image, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        valid = (
+            (ref_gray > self.clip_low) & (ref_gray < self.clip_high)
+            & (original_gray > self.clip_low) & (original_gray < self.clip_high)
+        )
+
         aligned_norm = match_histograms(
-            aligned_image, ref_image, channel_axis=-1
+            normalized_image, ref_image, channel_axis=-1
         ).astype(ref_image.dtype)
 
         ref_lab = cv2.cvtColor(ref_image, cv2.COLOR_BGR2LAB).astype(np.float32)
@@ -74,9 +93,6 @@ class GhostDetector:
 
         ref_L = ref_lab[:, :, 0]
         aligned_L = aligned_lab[:, :, 0]
-
-        # Validity mask: exclude clipped highlights / crushed shadows
-        valid = (ref_L > 2) & (ref_L < 253) & (aligned_L > 2) & (aligned_L < 253)
 
         luma_dissimilarity = self._compute_ssim_dissimilarity(ref_L, aligned_L)
         chroma_dissimilarity = self._compute_chroma_dissimilarity(ref_lab, aligned_lab)
@@ -223,28 +239,30 @@ class GhostDetector:
 # ══════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    if len(sys.argv) != 6:
+    if len(sys.argv) != 7:
         print(
-            "Usage: python ghost_detector.py ref_image.jpg aligned_image.jpg threshold min_area output_folder"
+            "Usage: python ghost_detector.py ref_image.jpg normalized_image.jpg original_image.jpg threshold min_area output_folder"
         )
         print("  The ref image is the middle exposure one.")
-        print("  The aligned image is the result of the alignment process.")
+        print("  The normalized image is the aligned, exposure-normalized bracket.")
+        print("  The original image is the aligned, non-normalized bracket (used for clip mask).")
         print("  The threshold is the value used to detect significant differences.")
         print("  The min_area is the minimum area of detected ghosting regions.")
         print("  The output folder is where the diagnostic images will be saved.")
         sys.exit(1)
 
     ref_image_path = sys.argv[1]
-    aligned_image_path = sys.argv[2]
-    threshold = float(sys.argv[3])
-    min_area = int(sys.argv[4])
-    output_folder = sys.argv[5]
+    normalized_image_path = sys.argv[2]
+    original_image_path = sys.argv[3]
+    threshold = float(sys.argv[4])
+    min_area = int(sys.argv[5])
+    output_folder = sys.argv[6]
 
     logger.info("Ghost detector started.")
 
     detector = GhostDetector(threshold=threshold, min_area=min_area)
 
-    ghost_mask = detector.detect_ghost_mask(ref_image_path, aligned_image_path)
+    ghost_mask = detector.detect_ghost_mask(ref_image_path, normalized_image_path, original_image_path)
 
     # Diagnostics image generation
     ref_image_with_mask = detector.visualize_ghosts(ref_image_path, ghost_mask)

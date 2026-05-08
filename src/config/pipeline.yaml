@@ -56,6 +56,8 @@ steps:
       adaptive_threshold: true   # use Otsu's method (true) or fixed threshold (false)
       threshold_min: 60          # (def: 25). Floor for adaptive threshold. This is the single most direct control for over-detection. Raise it to require stronger dissimilarity before flagging
       threshold_max: 120         # ceiling for adaptive threshold
+      clip_low: 10               # pixels <= this in the raw image are treated as crushed shadows and excluded from detection
+      clip_high: 245             # pixels >= this in the raw image are treated as blown highlights and excluded from detection
       diagnose: True             # if true, writes red-overlay visualisation of detected ghost areas
     merging:
       photomatix_exe: "C:\\Program Files\\Photomatix\\PhotomatixCL.exe"
