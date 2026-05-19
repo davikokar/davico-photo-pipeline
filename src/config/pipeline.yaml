@@ -31,6 +31,7 @@ steps:
   hdr:
     raw_to_jpg:
       dpp4cli_exe: "C:\\temp\\tools\\dpp4cli-1.2.0\\dpp4cli.exe"
+      # dpp4cli_exe: '/mnt/c/Temp/tools/dpp4cli-1.2.0/dpp4cli.exe'
       dpp4dir: "" # optional to DPP4 executable directory, if empty "C:\Program Files\Canon\Digital Photo Professional 4" will be used on Windows
       jpeg_quality: 100
       format: "jpg"
@@ -67,8 +68,8 @@ steps:
       styles:
         - natural
         - realistic
-      xmp_settings: ""    # path to .xmp for photographic/tone-compressor style
-
+        - photographic
+      
       # ── Ghost detection ───────────────────────────────────────────────────
       # Strategy A and B are triggered only if ghost_area_min_pct is exceeded.
       #
@@ -93,6 +94,9 @@ steps:
       reduce_ca: true         # -ca  chromatic aberration reduction
       noise_reduction: 1      # -no0 underexposed only, -no1 normal+under, -no2 all, -no9 merged
       # noise_strength: 100   # -nr  50-150, leave commented for default
+
+      photographic:
+        xmp_settings: "..\\hdr\\photomatix_photographic_preset.xmp"    # path to .xmp for photographic/tone-compressor style
 
       # ── Fusion/Natural Adjusted params ───────────────────────────────────
       natural:

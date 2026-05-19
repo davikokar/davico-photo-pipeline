@@ -150,6 +150,7 @@ def _process_bracket(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     mask_entries = []
+    all_masks: list[np.ndarray] = []
     ref_stem = reference_path.stem
 
     for aligned in aligned_normalized:
@@ -166,6 +167,7 @@ def _process_bracket(
         original_path = (session_dir / original_entry["relative_path"]).resolve()
 
         mask = detector.detect_ghost_mask(reference_path, normalized_path, original_path)
+        all_masks.append(mask)
         coverage_pct = float((mask > 0).sum()) / mask.size * 100.0
 
         mask_filename = f"ghost_mask_{ref_stem}_vs_{normalized_path.stem}.jpg"
@@ -195,6 +197,30 @@ def _process_bracket(
     if not mask_entries:
         return None
 
+    merged_mask = np.maximum.reduce(all_masks)
+    merged_filename = f"{ref_stem}_ghost_mask.jpg"
+    merged_path = output_dir / merged_filename
+    cv2.imwrite(str(merged_path), (merged_mask * 255).astype(np.uint8))
+    merged_coverage = float((merged_mask > 0).sum()) / merged_mask.size * 100.0
+
+    ghost_mask_entry = build_mask_entry(
+        source_filename="merged",
+        mask_filename=merged_filename,
+        relative_path=merged_path.relative_to(session_dir),
+        step_offset=0.0,
+        coverage_pct=merged_coverage,
+    )
+
+    if diagnose:
+        _write_diagnostic(
+            output_dir=output_dir,
+            reference_path=reference_path,
+            aligned_path=reference_path,
+            mask=merged_mask,
+            detector=detector,
+            log=log,
+        )
+
     reference_payload = {
         "filename": reference_entry["filename"],
         "relative_path": reference_entry["relative_path"],
@@ -204,6 +230,7 @@ def _process_bracket(
         bracket_index=int(bracket.get("index", 0)),
         reference=reference_payload,
         masks=mask_entries,
+        ghost_mask=ghost_mask_entry,
     )
 
 

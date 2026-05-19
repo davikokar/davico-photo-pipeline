@@ -15,9 +15,13 @@ logger = get_logger("integration_test")
 
 
 # @pytest.mark.parametrize("input_folder", ['C:\\Temp\\pipeline_tests\\mavic'])
-@pytest.mark.parametrize("raw_dir", ["C:\\Temp\\pipeline_tests\\canon\\raw"])
+# @pytest.mark.parametrize("raw_dir", ['/mnt/c/Temp/pipeline_tests/canon/raw'])
+# @pytest.mark.parametrize(
+#     "session_dir", ["/mnt/c/Temp/pipeline_tests/output/20260511_114848"]
+# )
+@pytest.mark.parametrize("raw_dir", ['c:\\Temp\\pipeline_tests\\canon\\raw'])
 @pytest.mark.parametrize(
-    "session_dir", ["C:\\Temp\\pipeline_tests\\output\\20260430_154800"]
+    "session_dir", ['c:\\Temp\\pipeline_tests\\output\\20260511_114848']
 )
 def test_raw_to_jpg_conversion(raw_dir, session_dir):
     """

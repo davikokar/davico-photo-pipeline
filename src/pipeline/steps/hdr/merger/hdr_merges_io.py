@@ -1,6 +1,6 @@
-"""Versioned persistence for ghost detection results.
+"""Versioned persistence for HDR merge results.
 
-Reads/writes the aggregate ``ghosts.json`` file in the session directory.
+Reads/writes the aggregate ``hdr_merges.json`` file in the session directory.
 """
 
 from __future__ import annotations
@@ -13,60 +13,55 @@ from pipeline.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-GHOSTS_VERSION = 1
-GHOSTS_FILENAME = "ghosts.json"
+HDR_MERGES_VERSION = 1
+HDR_MERGES_FILENAME = "hdr_merges.json"
 
 
 # ---------------------------------------------------------------------------
-# Per-bracket payload
+# Per-merge / per-bracket payload builders
 # ---------------------------------------------------------------------------
+
+
+def build_merge_entry(
+    style: str,
+    source_set: str,
+    source_files: list[str],
+    output_filename: str,
+    relative_path: Path | str,
+) -> dict:
+    """Describe one PhotomatixCL merge output in the JSON payload.
+
+    :param str style: Merge style used (``natural``, ``realistic``, ``photographic``)
+    :param str source_set: Which input set was merged
+        (``aligned_originals``, ``noghost``, ``originals``)
+    :param list[str] source_files: Relative paths of the input images
+    :param str output_filename: Name of the produced file
+    :param relative_path: Output path relative to session_dir
+    """
+    return {
+        "style": style,
+        "source_set": source_set,
+        "source_files": list(source_files),
+        "output_filename": output_filename,
+        "relative_path": str(relative_path).replace("\\", "/"),
+    }
+
 
 def build_bracket_payload(
     bracket_index: int,
     reference: dict,
-    masks: list[dict],
-    ghost_mask: dict | None = None,
+    merges: list[dict],
 ) -> dict:
-    """Build the JSON payload for one bracket's ghost masks.
+    """Build the JSON payload for one bracket's merge outputs.
 
     :param int bracket_index: Zero-based bracket index within the group
     :param dict reference: Reference shot info (``filename``, ``relative_path``)
-    :param list[dict] masks: One entry per non-reference aligned shot
-    :param dict ghost_mask: Merged (union) ghost mask entry for the bracket
-    :return: Serialisable bracket payload
-    :rtype: dict
-    """
-    payload = {
-        "index": bracket_index,
-        "reference": reference,
-        "masks": masks,
-    }
-    if ghost_mask is not None:
-        payload["ghost_mask"] = ghost_mask
-    return payload
-
-
-def build_mask_entry(
-    source_filename: str,
-    mask_filename: str,
-    relative_path: Path | str,
-    step_offset: float,
-    coverage_pct: float,
-) -> dict:
-    """Describe one ghost mask file in the JSON payload.
-
-    :param str source_filename: Aligned image the mask was computed from
-    :param str mask_filename: Output mask filename
-    :param relative_path: Mask path relative to session_dir
-    :param float step_offset: EV offset of the source aligned shot
-    :param float coverage_pct: Percentage of the image flagged as ghost (0-100)
+    :param list[dict] merges: One entry per merge output
     """
     return {
-        "source_filename": source_filename,
-        "filename": mask_filename,
-        "relative_path": str(relative_path).replace("\\", "/"),
-        "step_offset": float(step_offset),
-        "coverage_pct": round(float(coverage_pct), 3),
+        "index": bracket_index,
+        "reference": reference,
+        "merges": merges,
     }
 
 
@@ -74,9 +69,10 @@ def build_mask_entry(
 # Aggregate JSON read/write
 # ---------------------------------------------------------------------------
 
-def load_ghosts_json(session_dir: Path) -> dict | None:
-    """Load the aggregate ``ghosts.json``, or ``None`` if absent."""
-    path = Path(session_dir) / GHOSTS_FILENAME
+
+def load_hdr_merges_json(session_dir: Path) -> dict | None:
+    """Load the aggregate ``hdr_merges.json``, or ``None`` if absent."""
+    path = Path(session_dir) / HDR_MERGES_FILENAME
     if not path.exists():
         return None
     with open(path, encoding="utf-8") as handle:
@@ -85,27 +81,26 @@ def load_ghosts_json(session_dir: Path) -> dict | None:
     return data
 
 
-def upsert_group_in_ghosts_json(
+def upsert_group_in_hdr_merges_json(
     session_dir: Path,
     source_payload: dict,
     group_payload: dict,
 ) -> Path:
-    """Insert or replace one group in the aggregate ``ghosts.json``.
+    """Insert or replace one group in the aggregate ``hdr_merges.json``.
 
     :param Path session_dir: Session directory
-    :param dict source_payload: Upstream JSON payload (alignments) — used for session metadata
+    :param dict source_payload: Upstream JSON payload — used for session metadata
     :param dict group_payload: Serialisable group payload
     :return: Path to the aggregate JSON
-    :rtype: Path
     """
-    aggregate_path = Path(session_dir) / GHOSTS_FILENAME
+    aggregate_path = Path(session_dir) / HDR_MERGES_FILENAME
 
     if aggregate_path.exists():
         with open(aggregate_path, encoding="utf-8") as handle:
             payload = json.load(handle)
     else:
         payload = {
-            "version": GHOSTS_VERSION,
+            "version": HDR_MERGES_VERSION,
             "session_id": source_payload.get("session_id"),
             "input_dir": source_payload.get("input_dir"),
             "generated_at": datetime.now().isoformat(),
@@ -125,10 +120,10 @@ def upsert_group_in_ghosts_json(
 
 
 def _validate(data: dict) -> None:
-    if data.get("version") != GHOSTS_VERSION:
+    if data.get("version") != HDR_MERGES_VERSION:
         raise ValueError(
-            f"Unsupported ghosts.json version: {data.get('version')} "
-            f"(expected {GHOSTS_VERSION})"
+            f"Unsupported hdr_merges.json version: {data.get('version')} "
+            f"(expected {HDR_MERGES_VERSION})"
         )
     if "groups" not in data or not isinstance(data["groups"], list):
-        raise ValueError("ghosts.json: missing or invalid 'groups' field")
+        raise ValueError("hdr_merges.json: missing or invalid 'groups' field")

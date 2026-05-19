@@ -266,10 +266,16 @@ class Orchestrator:
         self.state.save()
 
     def _run_hdr_merge(self, group: dict, log) -> str | None:
-        """Merge HDR exposures and apply deghosting."""
-        # TODO: implement pipeline/steps/hdr_merger.py
-        log.info("HDR merge (stub)")
-        return None
+        """Merge HDR exposures using PhotomatixCL."""
+        from pipeline.steps.hdr.merger.adapter import run_group
+
+        result = run_group(
+            group_id=group["id"],
+            session_dir=self.state.session_dir,
+            config=self.config,
+            log=log,
+        )
+        return str(result) if result else None
 
     def _run_raw_to_jpg(self, group: dict, log) -> str | None:
         """Convert RAW files to JPEG derivatives required by the HDR step."""

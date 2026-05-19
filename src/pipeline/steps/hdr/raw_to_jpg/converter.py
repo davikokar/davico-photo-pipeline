@@ -286,6 +286,7 @@ def _build_single_shot_requests(
     requests.extend(
         _make_request(shot, key, recipe_paths, bracket_dir, "noghost", bracket_index)
         for key in required_keys
+        if key != "0"
     )
     return _deduplicate_requests(requests)
 
