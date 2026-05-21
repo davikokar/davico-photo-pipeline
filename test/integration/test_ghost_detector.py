@@ -12,7 +12,7 @@ from run import DEFAULT_CONFIG, load_config
 logger = get_logger("integration_test")
 
 # @pytest.mark.parametrize("session_dir", ['/mnt/c/Temp/pipeline_tests/output/20260511_114848'])
-@pytest.mark.parametrize("session_dir", ['C:\\Temp\\pipeline_tests\\output\\20260511_114848'])
+@pytest.mark.parametrize("session_dir", ['C:\\Temp\\pipeline_tests\\output\\20260520_144910'])
 def test_ghost_detector_integration(session_dir):
     """Requires alignments.json to already exist in session_dir."""
     config = load_config(DEFAULT_CONFIG)

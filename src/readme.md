@@ -43,7 +43,10 @@ grouping ->
 human review -> 
 if (terrestrial and raw images available) : raw conversion ->
 raw conversion check ->  
-if (hdr groups available, terrestrial and raw images available) : alignment and ghost mappging ->
+if (hdr groups available, terrestrial and raw images available) :
+
+
+
 if (hdr groups available and ghost mapping available) :
   hdr merge with ghost mapping -> 
 if (hdr groups available and no ghost mapping) : 
@@ -60,6 +63,18 @@ possible situations:
 - terrestrial, singleshot, with raw
 - terrestrial, singleshot, without raw
 (all these can be with or without panoramas)
+
+full pipeline:
+-grouping
+-human review
+-raw conversion
+-align
+-ghost detection
+-hdr merge
+-ghost application
+
+
+
 
 
 ## Grouping

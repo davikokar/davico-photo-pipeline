@@ -48,6 +48,7 @@ PIPELINE_STEPS = [
     "grouping",
     "raw_to_jpg",
     "hdr_merge",
+    "ghost_application",
     "stitch",
     "geometry",
     "crop",

@@ -177,7 +177,7 @@ class Orchestrator:
 
     def _process_group(self, group: dict):
         """Run RAW conversion, HDR merge, and stitch steps for a group."""
-        for step in ["raw_to_jpg", "hdr_merge", "stitch"]:
+        for step in ["raw_to_jpg", "hdr_merge", "ghost_application", "stitch"]:
             self._dispatch_step(group, step)
 
     def _process_group_post_hdr(self, group: dict):
@@ -304,6 +304,18 @@ class Orchestrator:
         except ValueError as exc:
             self.state.step_skip(group["id"], "raw_to_jpg", reason=str(exc))
             return None
+
+    def _run_ghost_application(self, group: dict, log) -> str | None:
+        """Apply ghost masks to blend HDR merge results."""
+        from pipeline.steps.hdr.ghost_application.adapter import run_group
+
+        result = run_group(
+            group_id=group["id"],
+            session_dir=self.state.session_dir,
+            config=self.config,
+            log=log,
+        )
+        return str(result) if result else None
 
     def _run_stitch(self, group: dict, log) -> str | None:
         """Stitch panoramic sequence."""

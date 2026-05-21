@@ -59,7 +59,7 @@ def _fake_subprocess_run(command, **kwargs):
 
 @pytest.mark.parametrize("mock_photomatix", [True, False])
 @pytest.mark.parametrize(
-    "session_dir", ["C:\\Temp\\pipeline_tests\\output\\20260511_114848"]
+    "session_dir", ["C:\\Temp\\pipeline_tests\\output\\20260520_144910"]
 )
 def test_hdr_merger_integration(session_dir, mock_photomatix):
     """Requires alignments.json and raw_conversions.json to already exist

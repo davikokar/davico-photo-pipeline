@@ -162,6 +162,7 @@ def _process_raw_group(
     for align_bracket in alignments_group.get("brackets", []):
         bracket_index = align_bracket.get("index", 0)
         reference = align_bracket["reference"]
+        ref_stem = Path(reference["filename"]).stem
         merge_entries: list[dict] = []
 
         # Set 1: aligned_originals + reference
@@ -176,6 +177,7 @@ def _process_raw_group(
                 _merge_bracket_source_set(
                     source_files=source_files,
                     source_set="aligned_originals",
+                    ref_stem=ref_stem,
                     output_dir=output_dir,
                     session_dir=session_dir,
                     settings=settings,
@@ -197,8 +199,13 @@ def _process_raw_group(
                 None,
             )
             noghost_entries = rc_bracket.get("noghost", [])
-            if ref_shot and noghost_entries:
-                noghost_files = [session_dir / ref_shot["relative_path"]]
+            ref_path = (
+                session_dir / ref_shot["relative_path"]
+                if ref_shot
+                else session_dir / reference["relative_path"]
+            )
+            if noghost_entries:
+                noghost_files = [ref_path]
                 noghost_files += [
                     session_dir / entry["relative_path"]
                     for entry in noghost_entries
@@ -207,6 +214,7 @@ def _process_raw_group(
                     _merge_bracket_source_set(
                         source_files=noghost_files,
                         source_set="noghost",
+                        ref_stem=ref_stem,
                         output_dir=output_dir,
                         session_dir=session_dir,
                         settings=settings,
@@ -265,6 +273,7 @@ def _process_jpeg_group(
         merge_entries = _merge_bracket_source_set(
             source_files=source_files,
             source_set="originals",
+            ref_stem=Path(ref_shot["filename"]).stem,
             output_dir=output_dir,
             session_dir=input_dir,
             settings=settings,
@@ -337,6 +346,7 @@ def _process_raw_noalign_group(
                 _merge_bracket_source_set(
                     source_files=noghost_files,
                     source_set="noghost",
+                    ref_stem=Path(ref_shot["filename"]).stem,
                     output_dir=output_dir,
                     session_dir=session_dir,
                     settings=settings,
@@ -359,9 +369,17 @@ def _process_raw_noalign_group(
 # ---------------------------------------------------------------------------
 
 
+_SOURCE_SET_LABEL = {
+    "aligned_originals": "hdr",
+    "noghost": "noghost",
+    "originals": "hdr",
+}
+
+
 def _merge_bracket_source_set(
     source_files: list[Path],
     source_set: str,
+    ref_stem: str,
     output_dir: Path,
     session_dir: Path,
     settings: PhotomatixSettings,
@@ -374,6 +392,7 @@ def _merge_bracket_source_set(
     Returns a list of merge entry dicts for the JSON payload.
     """
     merge_entries: list[dict] = []
+    label = _SOURCE_SET_LABEL.get(source_set, source_set)
 
     for style in styles:
         request = MergeRequest(
@@ -385,6 +404,11 @@ def _merge_bracket_source_set(
         )
 
         output_path = execute_merge(settings, request, log=log)
+
+        desired_name = f"{ref_stem}_{label}_{style}{output_path.suffix}"
+        desired_path = output_path.parent / desired_name
+        output_path.rename(desired_path)
+        output_path = desired_path
 
         try:
             relative = output_path.relative_to(session_dir)

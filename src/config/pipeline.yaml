@@ -30,6 +30,7 @@ grouper:
 steps:
   hdr:
     raw_to_jpg:
+      convert_base_exposure: false  # convert RAW with "0" recipe; false = skip (original JPGs already exist)
       dpp4cli_exe: "C:\\temp\\tools\\dpp4cli-1.2.0\\dpp4cli.exe"
       # dpp4cli_exe: '/mnt/c/Temp/tools/dpp4cli-1.2.0/dpp4cli.exe'
       dpp4dir: "" # optional to DPP4 executable directory, if empty "C:\Program Files\Canon\Digital Photo Professional 4" will be used on Windows

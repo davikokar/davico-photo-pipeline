@@ -41,14 +41,18 @@ def run(state: SessionState, config: dict, log=None) -> Path | None:
     aligner_cfg = config.get("steps", {}).get("hdr", {}).get("aligner", {})
     diagnose = bool(aligner_cfg.get("diagnose", False))
 
+    log.info("alignment: looking for raw_conversions.json in session_dir=%s", session_dir)
     raw_conversions = load_raw_conversions_json(session_dir)
     if raw_conversions is None:
-        log.info("alignment skipped: raw_conversions.json not found")
+        log.info("alignment skipped: raw_conversions.json not found at %s", session_dir / "raw_conversions.json")
         return None
 
     output_root = session_dir / ALIGNMENT_OUTPUT_SUBDIR
     aligner = BracketedImagesAligner()  # loads LoFTR model once for the whole session
     aggregate_path = None
+
+    input_dir = Path(raw_conversions.get("input_dir", ""))
+    log.info("alignment: input_dir=%s (exists=%s), groups=%d", input_dir, input_dir.exists(), len(raw_conversions.get("groups", [])))
 
     for group in raw_conversions["groups"]:
         group_id = group["id"]
@@ -60,6 +64,7 @@ def run(state: SessionState, config: dict, log=None) -> Path | None:
                 payload = _process_bracket(
                     bracket=bracket,
                     session_dir=session_dir,
+                    input_dir=input_dir,
                     output_root=output_root / group_id,
                     aligner=aligner,
                     diagnose=diagnose,
@@ -101,6 +106,7 @@ def run(state: SessionState, config: dict, log=None) -> Path | None:
 def _process_bracket(
     bracket: dict,
     session_dir: Path,
+    input_dir: Path,
     output_root: Path,
     aligner: BracketedImagesAligner,
     diagnose: bool,
@@ -109,6 +115,19 @@ def _process_bracket(
     """Align one bracket and return its payload, or None if nothing to align."""
     normalized = bracket.get("normalized", [])
     shots = bracket.get("shots", [])
+    source = bracket.get("source", [])
+
+    log.info(
+        "alignment: bracket %s — shots=%d, normalized=%d, source=%d",
+        bracket.get("index", "?"), len(shots), len(normalized), len(source),
+    )
+
+    if not shots:
+        log.info("alignment: no recipe-0 shots, falling back to source images from input_dir=%s", input_dir)
+        shots = _shots_from_source(bracket, input_dir)
+        log.info("alignment: built %d shot entries from source", len(shots))
+        for s in shots:
+            log.info("  source shot: %s ref=%s offset=%s path=%s", s["filename"], s["reference_shot"], s["step_offset"], s["relative_path"])
 
     reference_entry = next((s for s in shots if s.get("reference_shot")), None)
     if reference_entry is None:
@@ -119,9 +138,11 @@ def _process_bracket(
         return None
 
     reference_path = (session_dir / reference_entry["relative_path"]).resolve()
+    log.info("alignment: reference=%s exists=%s", reference_path, reference_path.exists())
 
     # Pair each non-reference original (in shots / noghost) with its exposure-normalized counterpart.
     originals = [s for s in shots if not s.get("reference_shot")]
+    log.info("alignment: originals=%d, normalized=%d", len(originals), len(normalized))
     if not originals or not normalized:
         log.info(
             "alignment: bracket %d has no non-reference shots to align — skipping",
@@ -130,6 +151,7 @@ def _process_bracket(
         return None
 
     normalized_by_offset = {round(float(s["step_offset"]), 4): s for s in normalized}
+    log.info("alignment: normalized offsets available: %s", sorted(normalized_by_offset.keys()))
 
     pairs: list[tuple[dict, dict]] = []  # (original_shot, normalized_shot)
     for original in originals:
@@ -139,13 +161,15 @@ def _process_bracket(
         norm = normalized_by_offset.get(offset)
         if norm is None:
             log.warning(
-                "alignment: no normalized counterpart for offset %+.2f — skipping shot",
-                offset,
+                "alignment: no normalized counterpart for offset %+.2f — skipping shot %s",
+                offset, original["filename"],
             )
             continue
+        log.info("alignment: paired %s (offset %+.2f) with normalized %s", original["filename"], offset, norm["filename"])
         pairs.append((original, norm))
 
     if not pairs:
+        log.info("alignment: no pairs found — skipping bracket")
         return None
 
     output_dir = output_root
@@ -153,6 +177,10 @@ def _process_bracket(
 
     original_paths = [(session_dir / o["relative_path"]).resolve() for o, _ in pairs]
     normalized_paths = [(session_dir / n["relative_path"]).resolve() for _, n in pairs]
+
+    for orig_path, norm_path in zip(original_paths, normalized_paths):
+        log.info("alignment: original=%s exists=%s", orig_path, orig_path.exists())
+        log.info("alignment: normalized=%s exists=%s", norm_path, norm_path.exists())
 
     # Run the worker (returns reference image as element 0 of each list)
     aligned_normalized, aligned_original = aligner.align(
@@ -214,6 +242,19 @@ def _process_bracket(
         aligned_originals=aligned_originals_payload,
         aligned_normalized=aligned_normalized_payload,
     )
+
+
+def _shots_from_source(bracket: dict, input_dir: Path) -> list[dict]:
+    """Build shot entries from source metadata when recipe-0 conversions were skipped."""
+    return [
+        {
+            "filename": src["filename"],
+            "relative_path": str(input_dir / src["filename"]),
+            "reference_shot": src.get("reference_shot", False),
+            "step_offset": src.get("step_offset", 0.0),
+        }
+        for src in bracket.get("source", [])
+    ]
 
 
 def _write_diagnostics(

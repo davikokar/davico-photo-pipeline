@@ -76,7 +76,11 @@ def run(state: SessionState, config: dict, log=None) -> Path | None:
         group_id = group["id"]
         log.info("raw_to_jpg: processing %s", group_id)
 
-        requests = plan_group_conversions(group, raw_index, recipe_paths, output_dir)
+        convert_base_exposure = bool(raw_to_jpg_cfg.get("convert_base_exposure", False))
+        requests = plan_group_conversions(
+            group, raw_index, recipe_paths, output_dir,
+            convert_base_exposure=convert_base_exposure,
+        )
         if not requests:
             log.info("raw_to_jpg: no RAW files for %s — skipping", group_id)
             state.step_skip(group_id, "raw_to_jpg", reason="no RAW files")

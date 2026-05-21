@@ -180,9 +180,17 @@ class BracketedImagesAligner:
         output_path = Path(output_folder)
         output_path.mkdir(exist_ok=True)
 
+        logger.info("align: ref=%s exists=%s", ref_image_path, Path(ref_image_path).exists())
+        logger.info("align: normalized_paths=%s", [str(p) for p in normalized_images_paths])
+        logger.info("align: original_paths=%s", [str(p) for p in original_images_paths])
+        logger.info("align: output_folder=%s", output_folder)
+
         # Load reference image to get dimensions
         ref_image = cv2.imread(str(ref_image_path))
-        h_ref, w_ref = ref_image.shape[:2]  # Qui otteniamo H e W reali
+        if ref_image is None:
+            raise FileNotFoundError(f"align: failed to load reference image: {ref_image_path}")
+        h_ref, w_ref = ref_image.shape[:2]
+        logger.info("align: reference loaded %dx%d", w_ref, h_ref)
 
         # The first image is already aligned to itself
         images_original_aligned = [ref_image]
@@ -192,8 +200,9 @@ class BracketedImagesAligner:
         for normalized_image_path, original_image_path in zip(
             normalized_images_paths, original_images_paths
         ):
-            print(
-                f"Analyzing {Path(normalized_image_path).name} to align {Path(original_image_path).name}"
+            logger.info(
+                "align: processing pair %d — normalized=%s original=%s",
+                i + 1, Path(normalized_image_path).name, Path(original_image_path).name,
             )
             i += 1
 
@@ -201,11 +210,20 @@ class BracketedImagesAligner:
             H, inliers_ref, inliers_target, all_p1, all_p2, mask = (
                 self._match_and_filter(ref_image_path, normalized_image_path)
             )
+            total_matches = len(all_p1)
+            inlier_count = int(mask.sum()) if mask is not None else 0
+            logger.info(
+                "align: pair %d — matches=%d, inliers=%d, H det=%.4f",
+                i, total_matches, inlier_count, np.linalg.det(H) if H is not None else 0,
+            )
 
             # Load original (over/underexposed) and normalized images for diagnostics and deghosting
-            # and the normalized images for diagnostics and deghosting
             original_image = cv2.imread(str(original_image_path))
             normalized_image = cv2.imread(str(normalized_image_path))
+            if original_image is None:
+                raise FileNotFoundError(f"align: failed to load original image: {original_image_path}")
+            if normalized_image is None:
+                raise FileNotFoundError(f"align: failed to load normalized image: {normalized_image_path}")
 
             # Apply global homography transformation
             original_image_warped_global = cv2.warpPerspective(
@@ -221,20 +239,18 @@ class BracketedImagesAligner:
             original_aligned_filename = (
                 f"{original_stem}_original_aligned{original_ext}"
             )
-            cv2.imwrite(
-                str(output_path / original_aligned_filename),
-                original_image_warped_global,
-            )
+            original_out = output_path / original_aligned_filename
+            cv2.imwrite(str(original_out), original_image_warped_global)
+            logger.info("align: wrote %s (exists=%s)", original_out, original_out.exists())
 
             normalized_stem = Path(normalized_image_path).stem
             normalized_ext = Path(normalized_image_path).suffix
             normalized_aligned_filename = (
                 f"{normalized_stem}_normalized_aligned{normalized_ext}"
             )
-            cv2.imwrite(
-                str(output_path / normalized_aligned_filename),
-                normalized_image_warped_global,
-            )
+            normalized_out = output_path / normalized_aligned_filename
+            cv2.imwrite(str(normalized_out), normalized_image_warped_global)
+            logger.info("align: wrote %s (exists=%s)", normalized_out, normalized_out.exists())
 
             # Append the aligned images to the result lists
             images_original_aligned.append(original_image_warped_global)

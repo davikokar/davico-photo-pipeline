@@ -156,6 +156,8 @@ def plan_group_conversions(
     raw_index: dict[str, Path],
     recipe_paths: dict[str, Path],
     output_dir: Path,
+    *,
+    convert_base_exposure: bool = False,
 ) -> list[ConversionRequest]:
     """Build all conversion requests for one group.
 
@@ -163,6 +165,7 @@ def plan_group_conversions(
     :param dict raw_index: Mapping of JPEG stem to RAW file path
     :param dict recipe_paths: Available recipes (canonical key → path)
     :param Path output_dir: Directory where converted JPEGs will be written
+    :param bool convert_base_exposure: If False, skip recipe "0" for the "shots" collection
     :return: Conversion requests for the whole group
     :rtype: list[ConversionRequest]
     """
@@ -178,6 +181,7 @@ def plan_group_conversions(
                 raw_index=raw_index,
                 recipe_paths=recipe_paths,
                 bracket_index=bracket_index,
+                convert_base_exposure=convert_base_exposure,
             )
         )
 
@@ -190,6 +194,8 @@ def _build_bracket_requests(
     raw_index: dict[str, Path],
     recipe_paths: dict[str, Path],
     bracket_index: int,
+    *,
+    convert_base_exposure: bool = False,
 ) -> list[ConversionRequest]:
     """Create conversion requests for one bracket."""
     if not normalized_shots:
@@ -202,7 +208,8 @@ def _build_bracket_requests(
 
     if not is_hdr_bracket:
         return _build_single_shot_requests(
-            resolved[0], bracket_dir, recipe_paths, bracket_index
+            resolved[0], bracket_dir, recipe_paths, bracket_index,
+            convert_base_exposure=convert_base_exposure,
         )
 
     required_recipe_keys = {"0"}
@@ -227,11 +234,12 @@ def _build_bracket_requests(
         key=lambda value: float(value),
     )
 
-    # All shots with recipe 0 → "shots" collection
-    for shot in resolved:
-        requests.append(
-            _make_request(shot, "0", recipe_paths, bracket_dir, "shots", bracket_index)
-        )
+    # All shots with recipe 0 → "shots" collection (skip if convert_base_exposure is off)
+    if convert_base_exposure:
+        for shot in resolved:
+            requests.append(
+                _make_request(shot, "0", recipe_paths, bracket_dir, "shots", bracket_index)
+            )
 
     # Reference shot with each non-zero recipe → "noghost" collection
     for offset_key in unique_offsets:
@@ -270,6 +278,8 @@ def _build_single_shot_requests(
     bracket_dir: Path,
     recipe_paths: dict[str, Path],
     bracket_index: int,
+    *,
+    convert_base_exposure: bool = False,
 ) -> list[ConversionRequest]:
     """Create pseudo-bracket conversions for a non-HDR shot."""
     required_keys = ["-2", "0", "+2"]
@@ -279,9 +289,10 @@ def _build_single_shot_requests(
             f"missing recipes for single-shot conversion: {', '.join(missing_keys)}"
         )
 
+    shot_keys = required_keys if convert_base_exposure else ["-2", "+2"]
     requests = [
         _make_request(shot, key, recipe_paths, bracket_dir, "shots", bracket_index)
-        for key in required_keys
+        for key in shot_keys
     ]
     requests.extend(
         _make_request(shot, key, recipe_paths, bracket_dir, "noghost", bracket_index)
