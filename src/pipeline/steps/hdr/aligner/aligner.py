@@ -192,6 +192,15 @@ class BracketedImagesAligner:
         h_ref, w_ref = ref_image.shape[:2]
         logger.info("align: reference loaded %dx%d", w_ref, h_ref)
 
+        # Save a copy of the reference with rotation baked in (cv2.imread
+        # applies EXIF rotation, so the saved copy has display-orientation
+        # pixels matching all other aligned outputs).
+        ref_stem = Path(ref_image_path).stem
+        ref_ext = Path(ref_image_path).suffix
+        ref_copy_path = output_path / f"{ref_stem}_reference{ref_ext}"
+        cv2.imwrite(str(ref_copy_path), ref_image)
+        logger.info("align: wrote reference copy %s", ref_copy_path)
+
         # The first image is already aligned to itself
         images_original_aligned = [ref_image]
         images_normalized_aligned = [ref_image]

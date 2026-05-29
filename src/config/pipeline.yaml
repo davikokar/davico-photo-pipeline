@@ -62,7 +62,7 @@ steps:
       clip_high: 245             # pixels >= this in the raw image are treated as blown highlights and excluded from detection
       diagnose: True             # if true, writes red-overlay visualisation of detected ghost areas
     merging:
-      photomatix_exe: "C:\\Program Files\\Photomatix\\PhotomatixCL.exe"
+      photomatix_exe: "C:\\Program Files\\PhotomatixPro4\\PhotomatixCL.exe"
       # ── Styles to generate ────────────────────────────────────────────────
       # Options: natural, realistic, photographic
       # photographic requires xmp_settings to be set.
@@ -91,7 +91,6 @@ steps:
       ghost_variance_percentile:  98.0
 
       # ── Common Photomatix options ─────────────────────────────────────────
-      align: true             # -a3  feature-based alignment
       reduce_ca: true         # -ca  chromatic aberration reduction
       noise_reduction: 1      # -no0 underexposed only, -no1 normal+under, -no2 all, -no9 merged
       # noise_strength: 100   # -nr  50-150, leave commented for default
@@ -110,11 +109,16 @@ steps:
         shadows:          6.0   # -2s  range   0 to +10
         white_point:      6.0   # -2w  range   0 to +10
 
-      # ── Fusion/Realistic params ───────────────────────────────────────────
+      # ── Fusion/Realistic params (same param set as natural, different values)
       realistic:
-        strength:         0.0   # -5a  range -10 to +10
-        color_saturation: 0.0   # -5c  range -10 to +10
-        sharpness:        2.0   # -5h  range   0 to +10
+        accentuation:     0.0   # -2a  range -10 to +10
+        blending_point:  -2.0   # -2b  range -10 to +10
+        color_saturation: 0.0   # -2c  range -10 to +10
+        sharpness:        2.0   # -2h  range   0 to +10
+        black_point:      0.0   # -2k  range   0 to +10
+        midtone:          0.0   # -2m  range -10 to +10
+        shadows:          0.0   # -2s  range   0 to +10
+        white_point:      0.0   # -2w  range   0 to +10
 
 
 

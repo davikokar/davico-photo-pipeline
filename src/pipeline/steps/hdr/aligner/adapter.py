@@ -231,9 +231,14 @@ def _process_bracket(
             )
         )
 
+    # Point to the saved reference copy (rotation baked in by OpenCV,
+    # ensuring pixel dimensions match all other aligned outputs).
+    ref_copy_name = f"{Path(reference_path).stem}_reference{Path(reference_path).suffix}"
+    ref_copy_path = output_dir / ref_copy_name
+
     reference_payload = {
-        "filename": reference_entry["filename"],
-        "relative_path": reference_entry["relative_path"],
+        "filename": ref_copy_name,
+        "relative_path": str(ref_copy_path.relative_to(session_dir)).replace("\\", "/"),
     }
 
     return build_bracket_payload(

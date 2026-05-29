@@ -393,6 +393,10 @@ def _merge_bracket_source_set(
     """
     merge_entries: list[dict] = []
     label = _SOURCE_SET_LABEL.get(source_set, source_set)
+    log.info(
+        "── source_set=%s styles=%s ref=%s",
+        source_set, styles, ref_stem,
+    )
 
     for style in styles:
         request = MergeRequest(
@@ -409,6 +413,7 @@ def _merge_bracket_source_set(
         desired_path = output_path.parent / desired_name
         output_path.rename(desired_path)
         output_path = desired_path
+        log.info("  renamed → %s", desired_name)
 
         try:
             relative = output_path.relative_to(session_dir)
@@ -445,11 +450,10 @@ def _merge_bracket_source_set(
 def _build_photomatix_settings(merging_cfg: dict, config_dir: Path) -> PhotomatixSettings:
     """Build PhotomatixSettings from the merging config section."""
     exe_path = merging_cfg.get("photomatix_exe", "PhotomatixCL.exe")
-    xmp_value = merging_cfg.get("xmp_settings", "")
+    xmp_value = merging_cfg.get("xmp_settings", "") or merging_cfg.get("photographic", {}).get("xmp_settings", "")
     xmp_path = _resolve_path(xmp_value, config_dir) if xmp_value else None
     return PhotomatixSettings(
         exe=_resolve_path(exe_path, config_dir),
-        align=bool(merging_cfg.get("align", True)),
         reduce_ca=bool(merging_cfg.get("reduce_ca", True)),
         noise_reduction=int(merging_cfg.get("noise_reduction", 1)),
         timeout_sec=int(merging_cfg.get("timeout_sec", 600)),
