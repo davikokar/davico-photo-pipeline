@@ -160,7 +160,7 @@ def _process_raw_group(
     rc_brackets = raw_conversions_group.get("brackets", [])
     bracket_payloads = []
 
-    for align_bracket in alignments_group.get("brackets", []):
+    for rc_index, align_bracket in enumerate(alignments_group.get("brackets", [])):
         bracket_index = align_bracket.get("index", 0)
         reference = align_bracket["reference"]
         merge_entries: list[dict] = []
@@ -188,8 +188,8 @@ def _process_raw_group(
 
         # Set 2: noghost images + reference
         rc_bracket = (
-            rc_brackets[bracket_index]
-            if bracket_index < len(rc_brackets)
+            rc_brackets[rc_index]
+            if rc_index < len(rc_brackets)
             else None
         )
         if rc_bracket is not None:

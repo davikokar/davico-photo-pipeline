@@ -44,16 +44,27 @@ def apply_ghost_mask(
     if noghost.shape[:2] != (h, w):
         noghost = cv2.resize(noghost, (w, h), interpolation=cv2.INTER_LINEAR)
 
+    src_dtype = aligned.dtype
     mask_float = mask.astype(np.float32) / 255.0
     if aligned.ndim == 3:
         mask_float = mask_float[:, :, np.newaxis]
 
     aligned_float = aligned.astype(np.float32)
+    del aligned
     noghost_float = noghost.astype(np.float32)
+    del noghost
 
-    blended = noghost_float * mask_float + aligned_float * (1.0 - mask_float)
-    blended = np.clip(blended, 0, np.iinfo(aligned.dtype).max if aligned.dtype != np.float32 else 1.0)
-    result = blended.astype(aligned.dtype)
+    np.multiply(noghost_float, mask_float, out=noghost_float)
+    np.subtract(1.0, mask_float, out=mask_float)
+    np.multiply(aligned_float, mask_float, out=aligned_float)
+    del mask_float
+    np.add(aligned_float, noghost_float, out=aligned_float)
+    del noghost_float
+
+    clip_max = np.iinfo(src_dtype).max if src_dtype != np.float32 else 1.0
+    np.clip(aligned_float, 0, clip_max, out=aligned_float)
+    result = aligned_float.astype(src_dtype)
+    del aligned_float
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     cv2.imwrite(str(output_path), result)
