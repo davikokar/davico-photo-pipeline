@@ -23,7 +23,9 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".tif", ".tiff", ".png", ".hdr", ".exr"}
 class PhotomatixSettings:
     exe: Path
     reduce_ca: bool = True
-    noise_reduction: int = 1
+    noise_reduction: int | None = 1
+    use_scratch_disk: bool = True
+    ev_spacing: float | None = 2.0
     timeout_sec: int = 1800
     xmp_path: Path | None = None
 
@@ -32,55 +34,69 @@ class PhotomatixSettings:
 class MergeRequest:
     source_files: list[Path]
     output_dir: Path
+    output_name: str
     style: str
     style_params: dict
     source_set: str
+
+
+def build_output_name(source_files: list[Path], style: str, source_set: str) -> str:
+    """Build the output filename (without extension) for a PhotomatixCL merge.
+
+    For aligned_originals/originals: ref_prefix + diff parts + "hdr" + Style
+    For noghost: ref_prefix + "noghost" + Style
+    """
+    def _prefix(path: Path) -> str:
+        stem = path.stem
+        return stem.split("_")[0] if "_" in stem else stem
+
+    ref_prefix = _prefix(source_files[0])
+
+    if source_set == "noghost":
+        return f"{ref_prefix}_noghost_{style.capitalize()}"
+
+    parts = [ref_prefix]
+    for f in source_files[1:]:
+        f_prefix = _prefix(f)
+        common = 0
+        for a, b in zip(ref_prefix, f_prefix):
+            if a != b:
+                break
+            common += 1
+        diff = f_prefix[common:]
+        parts.append(diff if diff else f_prefix)
+
+    parts.append("hdr")
+    parts.append(style.capitalize())
+    return "_".join(parts)
 
 
 def build_photomatix_command(
     settings: PhotomatixSettings,
     request: MergeRequest,
 ) -> list[str]:
-    """Build the full PhotomatixCL command-line argument list.
-
-    :param PhotomatixSettings settings: Global PhotomatixCL settings
-    :param MergeRequest request: Parameters for this specific merge
-    :return: Command arguments suitable for subprocess.run
-    """
+    """Build the full PhotomatixCL command-line argument list."""
     cmd: list[str] = [str(settings.exe)]
 
-    # Chromatic aberration reduction
     if settings.reduce_ca:
         cmd.append("-ca")
 
-    # Noise reduction
-    cmd.append(f"-no{settings.noise_reduction}")
+    if settings.noise_reduction is not None:
+        cmd.append(f"-no{settings.noise_reduction}")
 
-    # Naming: use first image name
-    cmd.extend(["-n", "0"])
+    if settings.use_scratch_disk:
+        cmd.append("-md")
 
-    # Destination directory (must end with double backslash on Windows)
     dest = str(request.output_dir).rstrip("\\") + "\\\\"
     cmd.extend(["-d", dest])
 
+    if settings.ev_spacing is not None:
+        cmd.extend(["-e", str(settings.ev_spacing)])
+
+    cmd.extend(["-o", request.output_name])
+
     # Style-specific flags
-    if request.style == "natural":
-        # -md (scratch disk) is only supported for Fusion/Natural
-        cmd.append("-md")
-        p = request.style_params
-        cmd.extend([
-            "-2",
-            "-2a", str(p["accentuation"]),
-            "-2b", str(p["blending_point"]),
-            "-2c", str(p["color_saturation"]),
-            "-2h", str(p["sharpness"]),
-            "-2k", str(p["black_point"]),
-            "-2m", str(p["midtone"]),
-            "-2s", str(p["shadows"]),
-            "-2w", str(p["white_point"]),
-        ])
-    elif request.style == "realistic":
-        cmd.append("-md")
+    if request.style in ("natural", "realistic"):
         p = request.style_params
         cmd.extend([
             "-2",
@@ -100,7 +116,6 @@ def build_photomatix_command(
     else:
         raise ValueError(f"Unknown merge style: {request.style}")
 
-    # Source images
     cmd.extend(str(f) for f in request.source_files)
 
     return cmd

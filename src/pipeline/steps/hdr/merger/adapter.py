@@ -21,6 +21,7 @@ from pipeline.steps.hdr.merger.hdr_merges_io import (
 from pipeline.steps.hdr.merger.photomatix import (
     MergeRequest,
     PhotomatixSettings,
+    build_output_name,
     execute_merge,
 )
 from pipeline.steps.hdr.raw_to_jpg.raw_conversions_io import load_raw_conversions_json
@@ -162,7 +163,6 @@ def _process_raw_group(
     for align_bracket in alignments_group.get("brackets", []):
         bracket_index = align_bracket.get("index", 0)
         reference = align_bracket["reference"]
-        ref_stem = Path(reference["filename"]).stem
         merge_entries: list[dict] = []
 
         # Set 1: aligned_originals + reference
@@ -177,7 +177,6 @@ def _process_raw_group(
                 _merge_bracket_source_set(
                     source_files=source_files,
                     source_set="aligned_originals",
-                    ref_stem=ref_stem,
                     output_dir=output_dir,
                     session_dir=session_dir,
                     settings=settings,
@@ -214,7 +213,6 @@ def _process_raw_group(
                     _merge_bracket_source_set(
                         source_files=noghost_files,
                         source_set="noghost",
-                        ref_stem=ref_stem,
                         output_dir=output_dir,
                         session_dir=session_dir,
                         settings=settings,
@@ -273,7 +271,6 @@ def _process_jpeg_group(
         merge_entries = _merge_bracket_source_set(
             source_files=source_files,
             source_set="originals",
-            ref_stem=Path(ref_shot["filename"]).stem,
             output_dir=output_dir,
             session_dir=input_dir,
             settings=settings,
@@ -346,7 +343,6 @@ def _process_raw_noalign_group(
                 _merge_bracket_source_set(
                     source_files=noghost_files,
                     source_set="noghost",
-                    ref_stem=Path(ref_shot["filename"]).stem,
                     output_dir=output_dir,
                     session_dir=session_dir,
                     settings=settings,
@@ -369,17 +365,9 @@ def _process_raw_noalign_group(
 # ---------------------------------------------------------------------------
 
 
-_SOURCE_SET_LABEL = {
-    "aligned_originals": "hdr",
-    "noghost": "noghost",
-    "originals": "hdr",
-}
-
-
 def _merge_bracket_source_set(
     source_files: list[Path],
     source_set: str,
-    ref_stem: str,
     output_dir: Path,
     session_dir: Path,
     settings: PhotomatixSettings,
@@ -392,28 +380,24 @@ def _merge_bracket_source_set(
     Returns a list of merge entry dicts for the JSON payload.
     """
     merge_entries: list[dict] = []
-    label = _SOURCE_SET_LABEL.get(source_set, source_set)
     log.info(
-        "── source_set=%s styles=%s ref=%s",
-        source_set, styles, ref_stem,
+        "── source_set=%s styles=%s files=%s",
+        source_set, styles, [f.name for f in source_files],
     )
 
     for style in styles:
+        output_name = build_output_name(source_files, style, source_set)
+
         request = MergeRequest(
             source_files=source_files,
             output_dir=output_dir,
+            output_name=output_name,
             style=style,
             style_params=style_configs.get(style, {}),
             source_set=source_set,
         )
 
         output_path = execute_merge(settings, request, log=log)
-
-        desired_name = f"{ref_stem}_{label}_{style}{output_path.suffix}"
-        desired_path = output_path.parent / desired_name
-        output_path.rename(desired_path)
-        output_path = desired_path
-        log.info("  renamed → %s", desired_name)
 
         try:
             relative = output_path.relative_to(session_dir)
@@ -452,10 +436,19 @@ def _build_photomatix_settings(merging_cfg: dict, config_dir: Path) -> Photomati
     exe_path = merging_cfg.get("photomatix_exe", "PhotomatixCL.exe")
     xmp_value = merging_cfg.get("xmp_settings", "") or merging_cfg.get("photographic", {}).get("xmp_settings", "")
     xmp_path = _resolve_path(xmp_value, config_dir) if xmp_value else None
+
+    nr_value = merging_cfg.get("noise_reduction", 1)
+    noise_reduction = None if nr_value is False else int(nr_value)
+
+    ev_value = merging_cfg.get("ev_spacing", 2.0)
+    ev_spacing = None if ev_value is False else float(ev_value)
+
     return PhotomatixSettings(
         exe=_resolve_path(exe_path, config_dir),
         reduce_ca=bool(merging_cfg.get("reduce_ca", True)),
-        noise_reduction=int(merging_cfg.get("noise_reduction", 1)),
+        noise_reduction=noise_reduction,
+        use_scratch_disk=bool(merging_cfg.get("use_scratch_disk", True)),
+        ev_spacing=ev_spacing,
         timeout_sec=int(merging_cfg.get("timeout_sec", 600)),
         xmp_path=xmp_path,
     )

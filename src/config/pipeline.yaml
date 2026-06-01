@@ -91,9 +91,10 @@ steps:
       ghost_variance_percentile:  98.0
 
       # ── Common Photomatix options ─────────────────────────────────────────
-      reduce_ca: true         # -ca  chromatic aberration reduction
-      noise_reduction: 1      # -no0 underexposed only, -no1 normal+under, -no2 all, -no9 merged
-      # noise_strength: 100   # -nr  50-150, leave commented for default
+      reduce_ca: true         # values: true/false; maps to flag: -ca  chromatic aberration reduction
+      noise_reduction: 1      # values: 0/1/2/9/false; maps to flags: -no0 underexposed only, -no1 normal+under, -no2 all, -no9 merged (configure as false to disable noise reduction)
+      ev_spacing: 2.0         # values: float/false; -ev EV spacing for bracketed shots when not available from exif (configure as false if you want to rely solely on exif)
+      use_scratch_disk: true  # values: true/false; maps to flag: -md 
 
       photographic:
         xmp_settings: "..\\hdr\\photomatix_photographic_preset.xmp"    # path to .xmp for photographic/tone-compressor style
