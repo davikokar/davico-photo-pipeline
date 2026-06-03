@@ -125,6 +125,15 @@ class GhostDetector:
             seeds = cv2.dilate(seeds, kernel_dilate, iterations=1)
             seeds = cv2.morphologyEx(seeds, cv2.MORPH_CLOSE, kernel_dilate)
 
+        # Fill all enclosed holes after dilation has sealed thin gaps
+        contours, hierarchy = cv2.findContours(
+            cv2.bitwise_not(seeds), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE
+        )
+        if hierarchy is not None:
+            for i, h in enumerate(hierarchy[0]):
+                if h[3] >= 0:
+                    cv2.drawContours(seeds, contours, i, 255, cv2.FILLED)
+
         # Gaussian blur for soft mask transitions
         blur_size = self.blur_size
         if blur_size > 0:
